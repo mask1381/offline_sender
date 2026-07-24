@@ -139,8 +139,10 @@ def get_ydl_opts(audio_only=False):
         opts['merge_output_format'] = 'mp4'
 
     deno_path = find_deno()
+    extractor_args = {'youtube': {'player_client': ['android', 'ios', 'web']}}
     if deno_path:
-        opts['extractor_args'] = {'youtube': {'js_runtimes': [f'deno:{deno_path}']}}
+        extractor_args['youtube']['js_runtimes'] = [f'deno:{deno_path}']
+    opts['extractor_args'] = extractor_args
 
     cookie_file = os.environ.get('YTDLP_COOKIES_FILE', '') or COOKIES_ARG
     if cookie_file and os.path.exists(cookie_file):
