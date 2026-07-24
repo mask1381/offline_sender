@@ -31,6 +31,7 @@ TG_API_HASH = os.environ.get("TG_API_HASH")
 TG_SESSION_STRING = os.environ.get("TG_SESSION_STRING")
 
 WORKDIR = tempfile.mkdtemp(prefix="job_")
+COOKIES_ARG = ''  # مقداردهی می‌شه از --cookies تو main()
 
 # ─────────────────────────────────────────
 # منطق کپشن (همون چیزی که قبلاً تو n8n Code node بود)
@@ -141,7 +142,7 @@ def get_ydl_opts(audio_only=False):
     if deno_path:
         opts['extractor_args'] = {'youtube': {'js_runtimes': [f'deno:{deno_path}']}}
 
-    cookie_file = os.environ.get('YTDLP_COOKIES_FILE', '')
+    cookie_file = os.environ.get('YTDLP_COOKIES_FILE', '') or COOKIES_ARG
     if cookie_file and os.path.exists(cookie_file):
         opts['cookiefile'] = cookie_file
 
@@ -188,7 +189,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--url', required=True)
     parser.add_argument('--chat-id', required=True)
+    parser.add_argument('--cookies', default='', help='مسیر فایل cookies.txt (اختیاری)')
     args = parser.parse_args()
+
+    global COOKIES_ARG
+    COOKIES_ARG = args.cookies
 
     if not (TG_API_ID and TG_API_HASH and TG_SESSION_STRING):
         print('❌ TG_API_ID / TG_API_HASH / TG_SESSION_STRING تنظیم نشده (باید GitHub Secrets باشن)')
