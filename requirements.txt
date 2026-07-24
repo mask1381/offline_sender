@@ -1,4 +1,4 @@
-yt-dlp>=2026.7.24
+yt-dlp
 telethon
 requests
 cryptg
