@@ -133,9 +133,9 @@ def get_ydl_opts(audio_only=False):
         'socket_timeout': 30,
     }
     if audio_only:
-        opts['format'] = 'bestaudio[ext=m4a]/bestaudio/best'
+        opts['format'] = 'bestaudio/best'
     else:
-        opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+        opts['format'] = 'bv*+ba/b'
         opts['merge_output_format'] = 'mp4'
 
     deno_path = find_deno()
