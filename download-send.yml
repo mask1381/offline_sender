@@ -1,0 +1,47 @@
+name: Download and Send to Telegram
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'لینک ویدیو/آهنگ برای دانلود'
+        required: true
+        type: string
+      chat_id:
+        description: 'chat_id مقصد در تلگرام'
+        required: true
+        type: string
+
+jobs:
+  download-and-send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install deno (for YouTube extractor)
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run download & send script
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+        run: |
+          python scripts/download_and_send.py \
+            --url "${{ inputs.url }}" \
+            --chat-id "${{ inputs.chat_id }}"
