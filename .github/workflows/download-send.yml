@@ -36,6 +36,9 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Setup YouTube cookies
+        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+
       - name: Run download & send script
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -44,5 +47,5 @@ jobs:
         run: |
           python scripts/download_and_send.py \
             --url "${{ inputs.url }}" \
-            --chat-id "${{ inputs.chat_id }}"
-
+            --chat-id "${{ inputs.chat_id }}" \
+            --cookies cookies.txt
