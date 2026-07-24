@@ -213,8 +213,17 @@ def main():
 
     print(f'⬇️  در حال دانلود ({"صوتی" if audio_only else "ویدیو"})...')
     opts = get_ydl_opts(audio_only=audio_only)
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.extract_info(url, download=True)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.extract_info(url, download=True)
+    except yt_dlp.utils.DownloadError as e:
+        if 'Requested format is not available' in str(e):
+            print('⚠️  فرمت اصلی موجود نبود، تلاش دوباره با فرمت ساده‌تر ("best")...')
+            opts['format'] = 'best'
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(url, download=True)
+        else:
+            raise
 
     files = [f for f in glob.glob(os.path.join(WORKDIR, '*')) if os.path.isfile(f)]
     if not files:
