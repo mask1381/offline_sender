@@ -4,13 +4,23 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'لینک ویدیو/آهنگ برای دانلود'
+        description: 'لینک ویدیو/پست برای دانلود'
         required: true
         type: string
       chat_id:
         description: 'chat_id مقصد در تلگرام'
         required: true
         type: string
+      slides:
+        description: 'شماره اسلایدهای انتخابی برای پست کروسل اینستا (مثلا 2,4) - خالی بذار یعنی همه'
+        required: false
+        type: string
+        default: ''
+      mode:
+        description: 'preview = فرستادن همه اسلایدها برای تایید | send = ارسال نهایی اسلایدهای انتخابی به کانال'
+        required: false
+        type: string
+        default: 'send'
       attempt:
         description: 'شماره‌ی تلاش فعلی (خودکار پر می‌شه، دستی نزن)'
         required: false
@@ -51,7 +61,14 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Setup YouTube cookies
+        if: contains(inputs.url, 'youtube.com') || contains(inputs.url, 'youtu.be')
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+
+      - name: Setup Instagram session
+        if: contains(inputs.url, 'instagram.com')
+        run: |
+          mkdir -p ~/.config/instaloader
+          echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
 
       - name: Run download & send script
         id: download
@@ -59,11 +76,15 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
         run: |
           python scripts/download_and_send.py \
             --url "${{ inputs.url }}" \
             --chat-id "${{ inputs.chat_id }}" \
-            --cookies cookies.txt
+            --cookies cookies.txt \
+            --ig-session ig_session.bin \
+            --slides "${{ inputs.slides }}" \
+            --mode "${{ inputs.mode }}"
 
       # اگه مرحله‌ی بالا fail بشه ولی هنوز به سقف تلاش نرسیده باشیم،
       # بعد از یه مکث کوتاه، خودمون رو دوباره با یه runner/IP تازه صدا می‌زنیم.
@@ -84,7 +105,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/download-send.yml/dispatches" \
-            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
+            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"slides\":\"${{ inputs.slides }}\",\"mode\":\"${{ inputs.mode }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
           echo "HTTP status: $HTTP_CODE"
           cat response.json
           if [ "$HTTP_CODE" -ge 300 ]; then
