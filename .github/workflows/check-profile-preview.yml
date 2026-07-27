@@ -1,0 +1,65 @@
+name: Check Profile and Send Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'یوزرنیم پروفایل اینستاگرام (بدون @)'
+        required: true
+        type: string
+      review_chat_id:
+        description: 'chat_id چت ریویو که پیش‌نمایش‌ها میرن'
+        required: true
+        type: string
+      days:
+        description: 'چند روز گذشته چک بشه'
+        required: false
+        type: string
+        default: '7'
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Setup Instagram session
+        run: |
+          if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
+            echo "🛑 secret به اسم INSTAGRAM_SESSION_B64 تنظیم نشده."
+            exit 1
+          fi
+          echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
+
+      - name: Run preview check
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+        run: |
+          python scripts/send_preview_buttons.py \
+            --profile "${{ inputs.profile }}" \
+            --review-chat-id "${{ inputs.review_chat_id }}" \
+            --ig-session ig_session.bin \
+            --seen-file data/seen_posts.json \
+            --days "${{ inputs.days }}"
+
+      - name: Commit updated seen_posts.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/seen_posts.json
+          git diff --staged --quiet && echo "چیزی برای کامیت نیست." || git commit -m "chore: update seen_posts.json [skip ci]"
+          git push
