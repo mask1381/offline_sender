@@ -63,7 +63,7 @@ def build_caption_instagram(source_username: str) -> str:
 
 
 # ─────────────────────────────────────────
-# راه‌اندازی و لاگین instaloader
+# راه‌اندازی instaloader (پیش‌فرض: anonymous / بدون لاگین)
 # ─────────────────────────────────────────
 def build_instaloader_instance(ig_session_path: str):
     import instaloader
@@ -75,33 +75,32 @@ def build_instaloader_instance(ig_session_path: str):
         save_metadata=False,
         post_metadata_txt_pattern='',
         quiet=True,
+        max_connection_attempts=1,  # anonymous: سریع fail بشه به‌جای retry loop طولانی
     )
 
-    if not IG_USERNAME:
-        print('❌ IG_USERNAME تنظیم نشده (باید GitHub Secret باشه) — بدون این، لاگین اینستا ممکن نیست')
-        sys.exit(1)
+    # اگه session داده نشده باشه، عمداً anonymous کار می‌کنیم (بدون لاگین)
+    if not ig_session_path:
+        print('ℹ️ بدون سشن اجرا می‌شه (anonymous) — فقط پست‌های پابلیک قابل دانلودن')
+        return L
 
-    if not ig_session_path or not os.path.exists(ig_session_path):
-        print(f'❌ فایل سشن اینستا پیدا نشد: {ig_session_path!r}')
-        sys.exit(1)
+    if not os.path.exists(ig_session_path):
+        print(f'⚠️ فایل سشن پیدا نشد ({ig_session_path!r}) — ادامه به‌صورت anonymous')
+        return L
+
+    if not IG_USERNAME:
+        print('⚠️ IG_USERNAME تنظیم نشده — نمی‌شه سشن رو لود کرد، ادامه به‌صورت anonymous')
+        return L
 
     try:
         L.load_session_from_file(IG_USERNAME, ig_session_path)
+        is_logged_in = getattr(L.context, 'is_logged_in', bool(L.context.username))
+        if is_logged_in:
+            print(f'✅ لاگین اینستا با موفقیت انجام شد: {L.context.username}')
+        else:
+            print('⚠️ سشن معتبر نیست (احتمالاً منقضی شده) — ادامه به‌صورت anonymous')
     except Exception as e:
-        print(f'❌ لود سشن اینستا شکست خورد: {e}')
-        sys.exit(1)
+        print(f'⚠️ لود سشن شکست خورد ({e}) — ادامه به‌صورت anonymous')
 
-    # چک می‌کنیم که سشن واقعاً معتبره (نه فقط فایلش لود شده)
-    try:
-        is_logged_in = L.context.is_logged_in
-    except AttributeError:
-        is_logged_in = bool(L.context.username)
-
-    if not is_logged_in:
-        print('❌ سشن لود شد ولی معتبر نیست (احتمالاً منقضی شده) — یه سشن تازه بساز')
-        sys.exit(1)
-
-    print(f'✅ لاگین اینستا با موفقیت انجام شد: {L.context.username}')
     return L
 
 
@@ -194,7 +193,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--url', required=True)
     parser.add_argument('--chat-id', required=True)
-    parser.add_argument('--ig-session', default='', help='مسیر فایل سشن instaloader (اجباری)')
+    parser.add_argument('--ig-session', default='', help='مسیر فایل سشن instaloader (اختیاری — نبود آن یعنی anonymous)')
     parser.add_argument('--slides', default='', help='شماره اسلایدهای انتخابی، مثلا 2,4 (فقط mode=send)')
     parser.add_argument('--mode', default='send', choices=['preview', 'send'])
     args = parser.parse_args()
