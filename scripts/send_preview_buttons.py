@@ -8,16 +8,25 @@ seen_posts.json نبوده رو (به ترتیب تاریخ، قدیمی‌تر�
     دکمه‌ی "تایید و ارسال"
   - برای پست تکی (عکس/ویدیو/ریلز): همون آیتم با دو دکمه‌ی "تایید" و "رد"
 
-خود ارسال نهایی به کانال جای دیگه (توسط n8n، با صدا زدن workflow
-download-send.yml) انجام می‌شه؛ این اسکریپت فقط پیش‌نمایش می‌فرسته.
+پیدا کردن/دیدن پست‌ها الان از طریق EnsembleData API انجام می‌شه (چون مسیر
+instaloader's Profile.from_username فعلاً به‌طور گسترده روی اینستاگرام
+بروکن‌ه). خود ارسال نهایی به کانال جای دیگه (توسط n8n، با صدا زدن workflow
+download-send.yml که همچنان از instaloader/Post.from_shortcode استفاده
+می‌کنه) انجام می‌شه؛ این اسکریپت فقط پیش‌نمایش می‌فرسته.
 
 استفاده:
   python send_preview_buttons.py --profile steambird.id --review-chat-id -1001234567890 \
-      --ig-session ig_session.bin --seen-file data/seen_posts.json --days 7
+      --seen-file data/seen_posts.json --days 7
+
+نیاز محیطی:
+  ENSEMBLEDATA_TOKEN   توکن EnsembleData (از dashboard.ensembledata.com)
+  TG_BOT_TOKEN         توکن بات تلگرام (برای ارسال پیش‌نمایش)
+
+نصب:
+  pip install ensembledata requests
 """
 
 import argparse
-import glob
 import json
 import os
 import shutil
@@ -26,9 +35,10 @@ import tempfile
 import time
 
 import requests
+from ensembledata.api import EDClient, EDError
 
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
-IG_USERNAME = os.environ.get("IG_USERNAME")
+ENSEMBLEDATA_TOKEN = os.environ.get("ENSEMBLEDATA_TOKEN")
 
 WORKDIR = tempfile.mkdtemp(prefix="preview_")
 API_BASE = None  # بعد از خوندن TG_BOT_TOKEN ست می‌شه
@@ -50,30 +60,75 @@ def save_seen(seen_file: str, seen: set):
         json.dump(sorted(seen), f, ensure_ascii=False, indent=2)
 
 
-def build_instaloader(ig_session_path: str):
-    import instaloader
-
-    L = instaloader.Instaloader(
-        dirname_pattern=WORKDIR,
-        filename_pattern='{shortcode}_{mediaid}',
-        download_video_thumbnails=False,
-        save_metadata=False,
-        post_metadata_txt_pattern='',
-        quiet=True,
-        max_connection_attempts=1,
+def ed_get_user_id(client: EDClient, username: str) -> str:
+    """یوزرنیم رو به user_id (pk) عددی اینستاگرام تبدیل می‌کنه."""
+    result = client.instagram.user_info(username=username)
+    data = result.data
+    # ساختار دقیق پاسخ ممکنه بسته به نسخه‌ی API کمی فرق کنه؛ چند مسیر محتمل رو امتحان می‌کنیم
+    user_id = (
+        data.get('pk')
+        or data.get('id')
+        or data.get('user_id')
+        or (data.get('user') or {}).get('pk')
+        or (data.get('data') or {}).get('pk')
     )
+    if not user_id:
+        raise RuntimeError(f'user_id تو پاسخ EnsembleData پیدا نشد. پاسخ خام: {json.dumps(data)[:500]}')
+    return str(user_id)
 
-    if not ig_session_path or not os.path.exists(ig_session_path) or not IG_USERNAME:
-        print('ℹ️ بدون سشن اجرا می‌شه (anonymous) — فقط پروفایل‌های پابلیک قابل چک‌ان')
-        return L
 
-    try:
-        L.load_session_from_file(IG_USERNAME, ig_session_path)
-        print(f'✅ لاگین اینستا با موفقیت انجام شد: {L.context.username}')
-    except Exception as e:
-        print(f'⚠️ لود سشن شکست خورد ({e}) — ادامه به‌صورت anonymous')
+def ed_get_recent_posts(client: EDClient, user_id: str, oldest_timestamp: int) -> list:
+    """لیست پست‌های اخیر پروفایل رو از EnsembleData می‌گیره."""
+    result = client.instagram.user_posts(
+        user_id=user_id,
+        depth=1,
+        oldest_timestamp=oldest_timestamp,
+        chunk_size=30,
+    )
+    data = result.data
+    # پاسخ معمولاً { "data": [ ...posts... ] } یا مستقیم لیست هست
+    posts = data.get('data') if isinstance(data, dict) else data
+    return posts or []
 
-    return L
+
+def extract_media_items(post: dict) -> list:
+    """
+    از یه آبجکت پست، لیست آیتم‌های قابل‌دانلود (عکس/ویدیو) رو استخراج می‌کنه.
+    هر آیتم: {"url": ..., "is_video": bool}
+    برای کروسل، همه‌ی media جدا برگردونده می‌شن.
+    """
+    items = []
+
+    def media_url(node: dict):
+        if node.get('video_versions'):
+            return node['video_versions'][0]['url'], True
+        candidates = (node.get('image_versions2') or {}).get('candidates') or []
+        if candidates:
+            return candidates[0]['url'], False
+        return None, False
+
+    carousel = post.get('carousel_media')
+    if carousel:
+        for node in carousel:
+            url, is_video = media_url(node)
+            if url:
+                items.append({'url': url, 'is_video': is_video})
+    else:
+        url, is_video = media_url(post)
+        if url:
+            items.append({'url': url, 'is_video': is_video})
+
+    return items
+
+
+def download_media(url: str, is_video: bool, dest_dir: str, idx: int) -> str:
+    ext = '.mp4' if is_video else '.jpg'
+    filepath = os.path.join(dest_dir, f'{idx}{ext}')
+    resp = requests.get(url, timeout=60)
+    resp.raise_for_status()
+    with open(filepath, 'wb') as f:
+        f.write(resp.content)
+    return filepath
 
 
 def tg_call(method: str, data: dict, files=None):
@@ -129,10 +184,10 @@ def send_single_item(chat_id, filepath, caption, shortcode):
         }, files={field: f})
 
 
-def describe_post_type(post) -> str:
-    if getattr(post, 'mediacount', 1) > 1:
-        return f'کروسل ({post.mediacount} اسلاید)'
-    if post.is_video:
+def describe_post_type(post: dict, n_items: int) -> str:
+    if n_items > 1:
+        return f'کروسل ({n_items} اسلاید)'
+    if post.get('video_versions'):
         return 'ریلز/ویدیو'
     return 'عکس تکی'
 
@@ -143,28 +198,41 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--profile', required=True)
     parser.add_argument('--review-chat-id', required=True)
-    parser.add_argument('--ig-session', default='', help='مسیر فایل سشن (اختیاری — نبود آن یعنی anonymous)')
     parser.add_argument('--seen-file', default='data/seen_posts.json')
     parser.add_argument('--days', type=int, default=7)
     args = parser.parse_args()
 
     if not TG_BOT_TOKEN:
         sys.exit('❌ TG_BOT_TOKEN تنظیم نشده (سکرت بات، نه اکانت شخصی)')
+    if not ENSEMBLEDATA_TOKEN:
+        sys.exit('❌ ENSEMBLEDATA_TOKEN تنظیم نشده')
     API_BASE = f'https://api.telegram.org/bot{TG_BOT_TOKEN}'
 
-    import instaloader
+    # اگه دستی از URL پیست شده، فقط یوزرنیم خالص رو نگه می‌داریم
+    profile_username = args.profile.strip().lstrip('@').split('?')[0].rstrip('/')
 
-    L = build_instaloader(args.ig_session)
-    profile = instaloader.Profile.from_username(L.context, args.profile)
+    client = EDClient(ENSEMBLEDATA_TOKEN)
 
-    cutoff = time.time() - args.days * 86400
+    try:
+        user_id = ed_get_user_id(client, profile_username)
+    except EDError as e:
+        sys.exit(f'❌ خطای EnsembleData موقع گرفتن user_id: {e.detail}')
+
+    cutoff = int(time.time() - args.days * 86400)
     seen = load_seen(args.seen_file)
 
+    try:
+        posts = ed_get_recent_posts(client, user_id, cutoff)
+    except EDError as e:
+        sys.exit(f'❌ خطای EnsembleData موقع گرفتن پست‌ها: {e.detail}')
+
     candidates = []
-    for post in profile.get_posts():
-        if post.date_utc.timestamp() < cutoff:
-            break
-        if post.shortcode not in seen:
+    for post in posts:
+        shortcode = post.get('code')
+        taken_at = post.get('taken_at') or post.get('taken_at_timestamp')
+        if not shortcode or (taken_at and taken_at < cutoff):
+            continue
+        if shortcode not in seen:
             candidates.append(post)
 
     if not candidates:
@@ -172,23 +240,28 @@ def main():
         return
 
     for post in reversed(candidates):  # قدیمی‌ترین اول
-        shortcode = post.shortcode
+        shortcode = post.get('code')
         post_url = f'https://www.instagram.com/p/{shortcode}/'
-        kind = describe_post_type(post)
+
+        media_items = extract_media_items(post)
+        if not media_items:
+            print(f'⚠️  آیتم قابل‌دانلودی برای {shortcode} پیدا نشد، رد شد.')
+            continue
+
+        kind = describe_post_type(post, len(media_items))
         print(f'⬇️  دانلود: {post_url} ({kind})')
 
         post_dir = os.path.join(WORKDIR, shortcode)
         os.makedirs(post_dir, exist_ok=True)
+
+        files = []
         try:
-            L.download_post(post, target=post_dir)
+            for idx, item in enumerate(media_items, start=1):
+                files.append(download_media(item['url'], item['is_video'], post_dir, idx))
         except Exception as e:
             print(f'⚠️  دانلود {shortcode} شکست خورد: {e} — رد شد.')
             continue
 
-        files = sorted(
-            f for f in glob.glob(os.path.join(post_dir, '*'))
-            if os.path.isfile(f) and f.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4'))
-        )
         if not files:
             print(f'⚠️  فایلی برای {shortcode} پیدا نشد، رد شد.')
             continue
