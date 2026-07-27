@@ -52,13 +52,15 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Setup Instagram session
+      - name: Setup Instagram session (optional)
         run: |
           if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
-            echo "🛑 secret به اسم INSTAGRAM_SESSION_B64 تنظیم نشده — بدون سشن، لاگین اینستا ممکن نیست."
-            exit 1
+            echo "ℹ️ secret INSTAGRAM_SESSION_B64 تنظیم نشده — اجرا به‌صورت anonymous (بدون لاگین) ادامه پیدا می‌کنه."
+            echo "IG_SESSION_ARG=" >> "$GITHUB_ENV"
+          else
+            echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
+            echo "IG_SESSION_ARG=--ig-session ig_session.bin" >> "$GITHUB_ENV"
           fi
-          echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
 
       - name: Run download & send script
         id: download
@@ -71,7 +73,7 @@ jobs:
           python scripts/download_and_send.py \
             --url "${{ inputs.url }}" \
             --chat-id "${{ inputs.chat_id }}" \
-            --ig-session ig_session.bin \
+            ${{ env.IG_SESSION_ARG }} \
             --slides "${{ inputs.slides }}" \
             --mode "${{ inputs.mode }}"
 
