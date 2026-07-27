@@ -217,6 +217,7 @@ def main():
         user_id = ed_get_user_id(client, profile_username)
     except EDError as e:
         sys.exit(f'❌ خطای EnsembleData موقع گرفتن user_id: {e.detail}')
+    print(f'🆔 user_id پیدا شد: {user_id}')
 
     cutoff = int(time.time() - args.days * 86400)
     seen = load_seen(args.seen_file)
@@ -226,14 +227,34 @@ def main():
     except EDError as e:
         sys.exit(f'❌ خطای EnsembleData موقع گرفتن پست‌ها: {e.detail}')
 
+    print(f'📦 EnsembleData تعداد {len(posts)} پست خام برگردوند.')
+    if posts:
+        print(f'🔍 نمونه‌ی اولین پست (خام، ۸۰۰ کاراکتر اول):\n{json.dumps(posts[0], ensure_ascii=False)[:800]}')
+    else:
+        print('⚠️  لیست پست‌های خام هم صفره — یعنی مشکل از EnsembleData/پارامترهاست، نه از فیلتر seen/days.')
+
     candidates = []
+    skipped_seen = 0
+    skipped_old = 0
+    skipped_no_code = 0
     for post in posts:
         shortcode = post.get('code')
         taken_at = post.get('taken_at') or post.get('taken_at_timestamp')
-        if not shortcode or (taken_at and taken_at < cutoff):
+        if not shortcode:
+            skipped_no_code += 1
             continue
-        if shortcode not in seen:
-            candidates.append(post)
+        if taken_at and taken_at < cutoff:
+            skipped_old += 1
+            continue
+        if shortcode in seen:
+            skipped_seen += 1
+            continue
+        candidates.append(post)
+    print(
+        f'📊 فیلتر: {len(candidates)} کاندید جدید | '
+        f'{skipped_seen} قبلاً seen | {skipped_old} قدیمی‌تر از {args.days} روز | '
+        f'{skipped_no_code} بدون فیلد code'
+    )
 
     if not candidates:
         print('ℹ️  پست جدیدی تو این بازه نیست.')
