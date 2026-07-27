@@ -60,15 +60,19 @@ def build_instaloader(ig_session_path: str):
         save_metadata=False,
         post_metadata_txt_pattern='',
         quiet=True,
+        max_connection_attempts=1,
     )
-    if not IG_USERNAME:
-        sys.exit('❌ IG_USERNAME تنظیم نشده')
-    if not ig_session_path or not os.path.exists(ig_session_path):
-        sys.exit(f'❌ فایل سشن پیدا نشد: {ig_session_path!r}')
+
+    if not ig_session_path or not os.path.exists(ig_session_path) or not IG_USERNAME:
+        print('ℹ️ بدون سشن اجرا می‌شه (anonymous) — فقط پروفایل‌های پابلیک قابل چک‌ان')
+        return L
+
     try:
         L.load_session_from_file(IG_USERNAME, ig_session_path)
+        print(f'✅ لاگین اینستا با موفقیت انجام شد: {L.context.username}')
     except Exception as e:
-        sys.exit(f'❌ لود سشن شکست خورد: {e}')
+        print(f'⚠️ لود سشن شکست خورد ({e}) — ادامه به‌صورت anonymous')
+
     return L
 
 
@@ -139,7 +143,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--profile', required=True)
     parser.add_argument('--review-chat-id', required=True)
-    parser.add_argument('--ig-session', required=True)
+    parser.add_argument('--ig-session', default='', help='مسیر فایل سشن (اختیاری — نبود آن یعنی anonymous)')
     parser.add_argument('--seen-file', default='data/seen_posts.json')
     parser.add_argument('--days', type=int, default=7)
     args = parser.parse_args()
