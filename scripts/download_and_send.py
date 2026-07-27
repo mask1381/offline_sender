@@ -32,6 +32,13 @@ TG_API_HASH = os.environ.get("TG_API_HASH")
 TG_SESSION_STRING = os.environ.get("TG_SESSION_STRING")
 IG_USERNAME = os.environ.get("IG_USERNAME")
 
+# پراکسی رزیدنشیال برای عبور از بلاک IP دیتاسنتری گیت‌هاب
+# فرمت: http://user:pass@host:port   یا   socks5://user:pass@host:port
+IG_PROXY_URL = os.environ.get("IG_PROXY_URL", "").strip()
+
+# کدام مرورگر واقعی برای جعل TLS fingerprint شبیه‌سازی بشه (curl_cffi)
+CURL_CFFI_IMPERSONATE = os.environ.get("CURL_CFFI_IMPERSONATE", "chrome124").strip()
+
 WORKDIR = tempfile.mkdtemp(prefix="job_")
 
 BOLD_ITALIC_MAP = {
@@ -63,6 +70,49 @@ def build_caption_instagram(source_username: str) -> str:
 
 
 # ─────────────────────────────────────────
+# جایگزینی requests.Session داخلی instaloader با یه session از curl_cffi
+# که رفتار TLS/HTTP2 مرورگر واقعی رو جعل می‌کنه (fingerprint spoofing)
+# + وصل کردن پراکسی رزیدنشیال (اگه تنظیم شده باشه)
+# ─────────────────────────────────────────
+def harden_session(L):
+    if not IG_PROXY_URL and not CURL_CFFI_IMPERSONATE:
+        return
+
+    try:
+        from curl_cffi import requests as cffi_requests
+    except ImportError:
+        print('⚠️ curl_cffi نصب نیست — بدون جعل TLS fingerprint ادامه می‌دیم (pip install curl_cffi)')
+        return
+
+    old_session = L.context._session
+
+    proxies = None
+    if IG_PROXY_URL:
+        proxies = {'http': IG_PROXY_URL, 'https': IG_PROXY_URL}
+
+    new_session = cffi_requests.Session(
+        impersonate=CURL_CFFI_IMPERSONATE or None,
+        proxies=proxies,
+        timeout=L.context.request_timeout or 300,
+    )
+
+    # کوکی‌ها و هدرهای قبلی (از جمله سشن لاگین‌شده، اگه لود شده باشه) رو منتقل می‌کنیم
+    try:
+        new_session.cookies.update(dict(old_session.cookies))
+    except Exception:
+        pass
+    try:
+        new_session.headers.update(dict(old_session.headers))
+    except Exception:
+        pass
+
+    L.context._session = new_session
+
+    proxy_note = 'با پراکسی رزیدنشیال' if IG_PROXY_URL else 'بدون پراکسی'
+    print(f'🛡️ session با curl_cffi (impersonate={CURL_CFFI_IMPERSONATE!r}, {proxy_note}) جایگزین شد')
+
+
+# ─────────────────────────────────────────
 # راه‌اندازی instaloader (پیش‌فرض: anonymous / بدون لاگین)
 # ─────────────────────────────────────────
 def build_instaloader_instance(ig_session_path: str):
@@ -81,14 +131,17 @@ def build_instaloader_instance(ig_session_path: str):
     # اگه session داده نشده باشه، عمداً anonymous کار می‌کنیم (بدون لاگین)
     if not ig_session_path:
         print('ℹ️ بدون سشن اجرا می‌شه (anonymous) — فقط پست‌های پابلیک قابل دانلودن')
+        harden_session(L)
         return L
 
     if not os.path.exists(ig_session_path):
         print(f'⚠️ فایل سشن پیدا نشد ({ig_session_path!r}) — ادامه به‌صورت anonymous')
+        harden_session(L)
         return L
 
     if not IG_USERNAME:
         print('⚠️ IG_USERNAME تنظیم نشده — نمی‌شه سشن رو لود کرد، ادامه به‌صورت anonymous')
+        harden_session(L)
         return L
 
     try:
@@ -101,6 +154,7 @@ def build_instaloader_instance(ig_session_path: str):
     except Exception as e:
         print(f'⚠️ لود سشن شکست خورد ({e}) — ادامه به‌صورت anonymous')
 
+    harden_session(L)
     return L
 
 
