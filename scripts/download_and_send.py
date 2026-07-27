@@ -143,7 +143,11 @@ def harden_session(L):
         pass
 
     # فقط رفتار پیمایش کوکی‌ها رو سازگار می‌کنیم (باگ instaloader/curl_cffi)
-    new_session.cookies = _CookieIterAdapter(new_session.cookies)
+    # نکته‌ی مهم: نباید new_session.cookies = ... کرد، چون curl_cffi روش
+    # یه property-setter داره که هر مقداری بدی رو دوباره به نوع native خودش
+    # (Cookies) تبدیل می‌کنه و adapter ما رو silently دور می‌ندازه. باید
+    # مستقیم attribute داخلی (_cookies) رو ست کنیم تا setter دور زده بشه.
+    new_session._cookies = _CookieIterAdapter(new_session.cookies)
 
     L.context._session = new_session
 
