@@ -1,5 +1,5 @@
 telethon
 requests
 cryptg
-ensembledata
+instagrapi
 git+https://github.com/instaloader/instaloader.git@refs/pull/2706/head
