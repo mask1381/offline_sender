@@ -36,25 +36,14 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Setup Instagram session (optional)
-        run: |
-          if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
-            echo "ℹ️ secret INSTAGRAM_SESSION_B64 تنظیم نشده — اجرا به‌صورت anonymous ادامه پیدا می‌کنه."
-            echo "IG_SESSION_ARG=" >> "$GITHUB_ENV"
-          else
-            echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
-            echo "IG_SESSION_ARG=--ig-session ig_session.bin" >> "$GITHUB_ENV"
-          fi
-
       - name: Run preview check
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          ENSEMBLEDATA_TOKEN: ${{ secrets.ENSEMBLEDATA_TOKEN }}
         run: |
           python scripts/send_preview_buttons.py \
             --profile "${{ inputs.profile }}" \
             --review-chat-id "${{ inputs.review_chat_id }}" \
-            ${{ env.IG_SESSION_ARG }} \
             --seen-file data/seen_posts.json \
             --days "${{ inputs.days }}"
 
