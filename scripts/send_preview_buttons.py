@@ -83,7 +83,7 @@ def ed_get_recent_posts(client: EDClient, user_id: str, oldest_timestamp: int) -
         user_id=user_id,
         depth=1,
         oldest_timestamp=oldest_timestamp,
-        chunk_size=30,
+        chunk_size=20,
     )
     data = result.data
     # پاسخ معمولاً { "data": [ ...posts... ] } یا مستقیم لیست هست
