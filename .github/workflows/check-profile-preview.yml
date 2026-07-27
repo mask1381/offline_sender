@@ -39,18 +39,20 @@ jobs:
       - name: Run preview check
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          ENSEMBLEDATA_TOKEN: ${{ secrets.ENSEMBLEDATA_TOKEN }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
         run: |
           python scripts/send_preview_buttons.py \
             --profile "${{ inputs.profile }}" \
             --review-chat-id "${{ inputs.review_chat_id }}" \
+            --ig-session data/ig_session.json \
             --seen-file data/seen_posts.json \
             --days "${{ inputs.days }}"
 
-      - name: Commit updated seen_posts.json
+      - name: Commit updated session and seen_posts
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/seen_posts.json
-          git diff --staged --quiet && echo "چیزی برای کامیت نیست." || git commit -m "chore: update seen_posts.json [skip ci]"
+          git add data/seen_posts.json data/ig_session.json
+          git diff --staged --quiet && echo "چیزی برای کامیت نیست." || git commit -m "chore: update seen_posts.json و ig_session.json [skip ci]"
           git push
