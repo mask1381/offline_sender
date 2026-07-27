@@ -1,10 +1,10 @@
-name: Download and Send to Telegram
+name: Download and Send to Telegram (Instagram)
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'لینک ویدیو/پست برای دانلود'
+        description: 'لینک پست اینستاگرام برای دانلود'
         required: true
         type: string
       chat_id:
@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       slides:
-        description: 'شماره اسلایدهای انتخابی برای پست کروسل اینستا (مثلا 2,4) - خالی بذار یعنی همه'
+        description: 'شماره اسلایدهای انتخابی برای پست کروسل (مثلا 2,4) - خالی بذار یعنی همه'
         required: false
         type: string
         default: ''
@@ -49,25 +49,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install deno (for YouTube extractor)
-        uses: denoland/setup-deno@v1
-        with:
-          deno-version: v1.x
-
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Setup YouTube cookies
-        if: contains(inputs.url, 'youtube.com') || contains(inputs.url, 'youtu.be')
-        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
-
       - name: Setup Instagram session
-        if: contains(inputs.url, 'instagram.com')
         run: |
-          mkdir -p ~/.config/instaloader
+          if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
+            echo "🛑 secret به اسم INSTAGRAM_SESSION_B64 تنظیم نشده — بدون سشن، لاگین اینستا ممکن نیست."
+            exit 1
+          fi
           echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
 
       - name: Run download & send script
@@ -81,7 +71,6 @@ jobs:
           python scripts/download_and_send.py \
             --url "${{ inputs.url }}" \
             --chat-id "${{ inputs.chat_id }}" \
-            --cookies cookies.txt \
             --ig-session ig_session.bin \
             --slides "${{ inputs.slides }}" \
             --mode "${{ inputs.mode }}"
