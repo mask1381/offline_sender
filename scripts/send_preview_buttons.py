@@ -86,6 +86,11 @@ def ed_get_recent_posts(client: EDClient, user_id: str, oldest_timestamp: int) -
         chunk_size=20,
     )
     data = result.data
+    print(f'🧾 نوع result.data: {type(data).__name__}')
+    if isinstance(data, dict):
+        print(f'🧾 کلیدهای سطح اول result.data: {list(data.keys())}')
+    print(f'🧾 خام (۱۲۰۰ کاراکتر اول): {json.dumps(data, ensure_ascii=False, default=str)[:1200]}')
+
     # پاسخ معمولاً { "data": [ ...posts... ] } یا مستقیم لیست هست
     posts = data.get('data') if isinstance(data, dict) else data
     return posts or []
