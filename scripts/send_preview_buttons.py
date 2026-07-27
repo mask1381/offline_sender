@@ -8,22 +8,27 @@ seen_posts.json نبوده رو (به ترتیب تاریخ، قدیمی‌تر�
     دکمه‌ی "تایید و ارسال"
   - برای پست تکی (عکس/ویدیو/ریلز): همون آیتم با دو دکمه‌ی "تایید" و "رد"
 
-پیدا کردن/دیدن پست‌ها الان از طریق EnsembleData API انجام می‌شه (چون مسیر
-instaloader's Profile.from_username فعلاً به‌طور گسترده روی اینستاگرام
-بروکن‌ه). خود ارسال نهایی به کانال جای دیگه (توسط n8n، با صدا زدن workflow
-download-send.yml که همچنان از instaloader/Post.from_shortcode استفاده
-می‌کنه) انجام می‌شه؛ این اسکریپت فقط پیش‌نمایش می‌فرسته.
+پیدا کردن/دیدن پست‌ها الان از طریق instagrapi (Instagram Private API، همون
+APIای که اپ موبایل استفاده می‌کنه) انجام می‌شه — چون مسیر instaloader's
+Profile.from_username و همچنین EnsembleData هردو تجربه‌شون شکست خورد.
+instagrapi نیاز به لاگین واقعی با یه اکانت (ترجیحاً یه اکانت مصرفی/throwaway،
+نه اکانت اصلی) داره.
+
+خود ارسال نهایی به کانال جای دیگه (توسط n8n، با صدا زدن workflow
+download-send.yml که از instaloader/Post.from_shortcode استفاده می‌کنه)
+انجام می‌شه؛ این اسکریپت فقط پیش‌نمایش می‌فرسته.
 
 استفاده:
   python send_preview_buttons.py --profile steambird.id --review-chat-id -1001234567890 \
-      --seen-file data/seen_posts.json --days 7
+      --ig-session ig_session.json --seen-file data/seen_posts.json --days 7
 
 نیاز محیطی:
-  ENSEMBLEDATA_TOKEN   توکن EnsembleData (از dashboard.ensembledata.com)
-  TG_BOT_TOKEN         توکن بات تلگرام (برای ارسال پیش‌نمایش)
+  TG_BOT_TOKEN     توکن بات تلگرام (برای ارسال پیش‌نمایش)
+  IG_USERNAME      یوزرنیم اکانت اینستای مصرفی (برای لاگین/رفرش سشن)
+  IG_PASSWORD      پسورد همون اکانت (برای لاگین/رفرش سشن)
 
 نصب:
-  pip install ensembledata requests
+  pip install instagrapi requests
 """
 
 import argparse
@@ -35,10 +40,12 @@ import tempfile
 import time
 
 import requests
-from ensembledata.api import EDClient, EDError
+from instagrapi import Client
+from instagrapi.exceptions import ClientError, LoginRequired
 
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
-ENSEMBLEDATA_TOKEN = os.environ.get("ENSEMBLEDATA_TOKEN")
+IG_USERNAME = os.environ.get("IG_USERNAME")
+IG_PASSWORD = os.environ.get("IG_PASSWORD")
 
 WORKDIR = tempfile.mkdtemp(prefix="preview_")
 API_BASE = None  # بعد از خوندن TG_BOT_TOKEN ست می‌شه
@@ -60,66 +67,57 @@ def save_seen(seen_file: str, seen: set):
         json.dump(sorted(seen), f, ensure_ascii=False, indent=2)
 
 
-def ed_get_user_id(client: EDClient, username: str) -> str:
-    """یوزرنیم رو به user_id (pk) عددی اینستاگرام تبدیل می‌کنه."""
-    result = client.instagram.user_info(username=username)
-    data = result.data
-    # ساختار دقیق پاسخ ممکنه بسته به نسخه‌ی API کمی فرق کنه؛ چند مسیر محتمل رو امتحان می‌کنیم
-    user_id = (
-        data.get('pk')
-        or data.get('id')
-        or data.get('user_id')
-        or (data.get('user') or {}).get('pk')
-        or (data.get('data') or {}).get('pk')
-    )
-    if not user_id:
-        raise RuntimeError(f'user_id تو پاسخ EnsembleData پیدا نشد. پاسخ خام: {json.dumps(data)[:500]}')
-    return str(user_id)
-
-
-def ed_get_recent_posts(client: EDClient, user_id: str, oldest_timestamp: int) -> list:
-    """لیست پست‌های اخیر پروفایل رو از EnsembleData می‌گیره."""
-    result = client.instagram.user_posts(
-        user_id=user_id,
-        depth=1,
-        oldest_timestamp=oldest_timestamp,
-        chunk_size=20,
-    )
-    data = result.data
-    print(f'🧾 نوع result.data: {type(data).__name__}')
-    if isinstance(data, dict):
-        print(f'🧾 کلیدهای سطح اول result.data: {list(data.keys())}')
-    print(f'🧾 خام (۱۲۰۰ کاراکتر اول): {json.dumps(data, ensure_ascii=False, default=str)[:1200]}')
-
-    # پاسخ معمولاً { "data": [ ...posts... ] } یا مستقیم لیست هست
-    posts = data.get('data') if isinstance(data, dict) else data
-    return posts or []
-
-
-def extract_media_items(post: dict) -> list:
+def build_client(session_path: str) -> Client:
     """
-    از یه آبجکت پست، لیست آیتم‌های قابل‌دانلود (عکس/ویدیو) رو استخراج می‌کنه.
+    یه Client لاگین‌شده‌ی instagrapi می‌سازه. اگه فایل سشن موجود باشه ازش
+    استفاده می‌کنه (بدون لاگین مجدد کامل)؛ اگه نبود یا نامعتبر بود، با
+    یوزر/پسورد لاگین می‌کنه و سشن جدید رو ذخیره می‌کنه.
+    """
+    if not IG_USERNAME or not IG_PASSWORD:
+        sys.exit('❌ IG_USERNAME و IG_PASSWORD تنظیم نشدن (سکرت‌های اکانت مصرفی اینستا)')
+
+    cl = Client()
+
+    if session_path and os.path.exists(session_path):
+        try:
+            cl.load_settings(session_path)
+            cl.login(IG_USERNAME, IG_PASSWORD)
+            cl.get_timeline_feed()  # چک می‌کنیم سشن واقعاً معتبره
+            print('✅ سشن قبلی معتبر بود، بدون لاگین کامل ادامه داده شد.')
+            return cl
+        except (LoginRequired, ClientError, Exception) as e:
+            print(f'⚠️ سشن قبلی معتبر نبود ({e}) — لاگین کامل انجام می‌شه.')
+            cl = Client()
+
+    cl.login(IG_USERNAME, IG_PASSWORD)
+    if session_path:
+        os.makedirs(os.path.dirname(session_path) or '.', exist_ok=True)
+        cl.dump_settings(session_path)
+        print(f'✅ لاگین انجام شد و سشن جدید تو {session_path} ذخیره شد.')
+    return cl
+
+
+def extract_media_items(media) -> list:
+    """
+    از یه شیء Media (instagrapi)، لیست آیتم‌های قابل‌دانلود رو استخراج می‌کنه.
     هر آیتم: {"url": ..., "is_video": bool}
-    برای کروسل، همه‌ی media جدا برگردونده می‌شن.
     """
     items = []
 
-    def media_url(node: dict):
-        if node.get('video_versions'):
-            return node['video_versions'][0]['url'], True
-        candidates = (node.get('image_versions2') or {}).get('candidates') or []
-        if candidates:
-            return candidates[0]['url'], False
+    def resource_url(res):
+        if getattr(res, 'video_url', None):
+            return str(res.video_url), True
+        if getattr(res, 'thumbnail_url', None):
+            return str(res.thumbnail_url), False
         return None, False
 
-    carousel = post.get('carousel_media')
-    if carousel:
-        for node in carousel:
-            url, is_video = media_url(node)
+    if media.resources:  # کروسل
+        for res in media.resources:
+            url, is_video = resource_url(res)
             if url:
                 items.append({'url': url, 'is_video': is_video})
     else:
-        url, is_video = media_url(post)
+        url, is_video = resource_url(media)
         if url:
             items.append({'url': url, 'is_video': is_video})
 
@@ -189,10 +187,10 @@ def send_single_item(chat_id, filepath, caption, shortcode):
         }, files={field: f})
 
 
-def describe_post_type(post: dict, n_items: int) -> str:
+def describe_post_type(media, n_items: int) -> str:
     if n_items > 1:
         return f'کروسل ({n_items} اسلاید)'
-    if post.get('video_versions'):
+    if media.media_type == 2:
         return 'ریلز/ویدیو'
     return 'عکس تکی'
 
@@ -203,78 +201,68 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--profile', required=True)
     parser.add_argument('--review-chat-id', required=True)
+    parser.add_argument('--ig-session', default='ig_session.json', help='مسیر فایل سشن instagrapi')
     parser.add_argument('--seen-file', default='data/seen_posts.json')
     parser.add_argument('--days', type=int, default=7)
     args = parser.parse_args()
 
     if not TG_BOT_TOKEN:
         sys.exit('❌ TG_BOT_TOKEN تنظیم نشده (سکرت بات، نه اکانت شخصی)')
-    if not ENSEMBLEDATA_TOKEN:
-        sys.exit('❌ ENSEMBLEDATA_TOKEN تنظیم نشده')
     API_BASE = f'https://api.telegram.org/bot{TG_BOT_TOKEN}'
 
     # اگه دستی از URL پیست شده، فقط یوزرنیم خالص رو نگه می‌داریم
     profile_username = args.profile.strip().lstrip('@').split('?')[0].rstrip('/')
 
-    client = EDClient(ENSEMBLEDATA_TOKEN)
+    cl = build_client(args.ig_session)
 
     try:
-        user_id = ed_get_user_id(client, profile_username)
-    except EDError as e:
-        sys.exit(f'❌ خطای EnsembleData موقع گرفتن user_id: {e.detail}')
+        user_id = cl.user_id_from_username(profile_username)
+    except Exception as e:
+        sys.exit(f'❌ پیدا کردن user_id برای {profile_username} شکست خورد: {e}')
     print(f'🆔 user_id پیدا شد: {user_id}')
 
     cutoff = int(time.time() - args.days * 86400)
     seen = load_seen(args.seen_file)
 
     try:
-        posts = ed_get_recent_posts(client, user_id, cutoff)
-    except EDError as e:
-        sys.exit(f'❌ خطای EnsembleData موقع گرفتن پست‌ها: {e.detail}')
+        medias = cl.user_medias(user_id, amount=30)
+    except Exception as e:
+        sys.exit(f'❌ گرفتن پست‌ها شکست خورد: {e}')
 
-    print(f'📦 EnsembleData تعداد {len(posts)} پست خام برگردوند.')
-    if posts:
-        print(f'🔍 نمونه‌ی اولین پست (خام، ۸۰۰ کاراکتر اول):\n{json.dumps(posts[0], ensure_ascii=False)[:800]}')
-    else:
-        print('⚠️  لیست پست‌های خام هم صفره — یعنی مشکل از EnsembleData/پارامترهاست، نه از فیلتر seen/days.')
+    print(f'📦 تعداد {len(medias)} پست خام برگشت.')
 
     candidates = []
     skipped_seen = 0
     skipped_old = 0
-    skipped_no_code = 0
-    for post in posts:
-        shortcode = post.get('code')
-        taken_at = post.get('taken_at') or post.get('taken_at_timestamp')
-        if not shortcode:
-            skipped_no_code += 1
-            continue
+    for media in medias:
+        shortcode = media.code
+        taken_at = media.taken_at.timestamp() if media.taken_at else None
         if taken_at and taken_at < cutoff:
             skipped_old += 1
             continue
         if shortcode in seen:
             skipped_seen += 1
             continue
-        candidates.append(post)
+        candidates.append(media)
     print(
         f'📊 فیلتر: {len(candidates)} کاندید جدید | '
-        f'{skipped_seen} قبلاً seen | {skipped_old} قدیمی‌تر از {args.days} روز | '
-        f'{skipped_no_code} بدون فیلد code'
+        f'{skipped_seen} قبلاً seen | {skipped_old} قدیمی‌تر از {args.days} روز'
     )
 
     if not candidates:
         print('ℹ️  پست جدیدی تو این بازه نیست.')
         return
 
-    for post in reversed(candidates):  # قدیمی‌ترین اول
-        shortcode = post.get('code')
+    for media in reversed(candidates):  # قدیمی‌ترین اول
+        shortcode = media.code
         post_url = f'https://www.instagram.com/p/{shortcode}/'
 
-        media_items = extract_media_items(post)
+        media_items = extract_media_items(media)
         if not media_items:
             print(f'⚠️  آیتم قابل‌دانلودی برای {shortcode} پیدا نشد، رد شد.')
             continue
 
-        kind = describe_post_type(post, len(media_items))
+        kind = describe_post_type(media, len(media_items))
         print(f'⬇️  دانلود: {post_url} ({kind})')
 
         post_dir = os.path.join(WORKDIR, shortcode)
