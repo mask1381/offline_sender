@@ -79,6 +79,37 @@ def build_caption_instagram(source_username: str) -> str:
 # که رفتار TLS/HTTP2 مرورگر واقعی رو جعل می‌کنه (fingerprint spoofing)
 # + وصل کردن پراکسی رزیدنشیال (اگه تنظیم شده باشه)
 # ─────────────────────────────────────────
+class _CookieIterAdapter:
+    """
+    curl_cffi's cookies object پیمایش رو مثل دیکشنری انجام می‌ده (فقط اسم
+    کوکی‌ها رو برمی‌گردونه)، اما instaloader انتظار داره هر آیتم پیمایش‌شده
+    یه شیء با .name/.value باشه (مثل http.cookiejar.Cookie / requests).
+    این adapter فقط رفتار پیمایش رو اصلاح می‌کنه؛ همه‌چیز دیگه (get/set/
+    update و مدیریت واقعی کوکی توسط curl_cffi) دست‌نخورده به شیء اصلی
+    delegate می‌شه.
+    """
+
+    def __init__(self, cookies):
+        self._cookies = cookies
+
+    def __iter__(self):
+        try:
+            items = dict(self._cookies).items()
+        except Exception:
+            items = []
+        for name, value in items:
+            yield type('_Cookie', (), {'name': name, 'value': value})()
+
+    def __getattr__(self, name):
+        return getattr(self._cookies, name)
+
+    def __contains__(self, key):
+        return key in self._cookies
+
+    def __len__(self):
+        return len(self._cookies)
+
+
 def harden_session(L):
     if not IG_PROXY_URL and not CURL_CFFI_IMPERSONATE:
         return
@@ -110,6 +141,9 @@ def harden_session(L):
         new_session.headers.update(dict(old_session.headers))
     except Exception:
         pass
+
+    # فقط رفتار پیمایش کوکی‌ها رو سازگار می‌کنیم (باگ instaloader/curl_cffi)
+    new_session.cookies = _CookieIterAdapter(new_session.cookies)
 
     L.context._session = new_session
 
