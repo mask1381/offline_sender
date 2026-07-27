@@ -13,12 +13,14 @@
 import argparse
 import asyncio
 import glob
+import json
 import os
 import re
 import shutil
 import sys
 import tempfile
 
+import requests
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
@@ -31,6 +33,9 @@ TG_API_ID = os.environ.get("TG_API_ID")
 TG_API_HASH = os.environ.get("TG_API_HASH")
 TG_SESSION_STRING = os.environ.get("TG_SESSION_STRING")
 IG_USERNAME = os.environ.get("IG_USERNAME")
+
+# توکن بات (فقط برای پیش‌نمایش با دکمه — ارسال نهایی همچنان با اکانت شخصی/Telethon است)
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 
 # پراکسی رزیدنشیال برای عبور از بلاک IP دیتاسنتری گیت‌هاب
 # فرمت: http://user:pass@host:port   یا   socks5://user:pass@host:port
@@ -160,8 +165,9 @@ def build_instaloader_instance(ig_session_path: str):
 
 # ─────────────────────────────────────────
 # دانلود اینستاگرام با instaloader (پشتیبانی از کروسل چند اسلایدی)
+# فقط دانلود خام — تصمیم درباره‌ی فیلتر/کپشن به‌عهده‌ی main() است
 # ─────────────────────────────────────────
-def download_instagram(url: str, ig_session_path: str, slides_filter, mode: str):
+def download_instagram(url: str, ig_session_path: str):
     import instaloader
 
     L = build_instaloader_instance(ig_session_path)
@@ -183,35 +189,63 @@ def download_instagram(url: str, ig_session_path: str, slides_filter, mode: str)
         print('❌ هیچ فایلی دانلود نشد')
         sys.exit(1)
 
+    return files, shortcode, source_username
+
+
+# ─────────────────────────────────────────
+# ارسال پیش‌نمایش با دکمه‌ی شیشه‌ای از طریق Bot API
+# (بات، نه اکانت شخصی — فرمت دکمه‌ها دقیقاً با n8n هماهنگه:
+#  tg:<shortcode>:<idx> برای toggle هر اسلاید، cf:<shortcode> برای تایید،
+#  rj:<shortcode> برای رد)
+# ─────────────────────────────────────────
+def tg_bot_call(method: str, data: dict, files=None):
+    if not TG_BOT_TOKEN:
+        sys.exit('❌ TG_BOT_TOKEN تنظیم نشده (لازم برای پیش‌نمایش با دکمه)')
+    url = f'https://api.telegram.org/bot{TG_BOT_TOKEN}/{method}'
+    resp = requests.post(url, data=data, files=files, timeout=60)
+    result = resp.json()
+    if not result.get('ok'):
+        raise RuntimeError(f'خطای Telegram Bot API در {method}: {result}')
+    return result['result']
+
+
+def send_preview(files, shortcode, chat_id):
     total = len(files)
 
-    if mode == 'preview':
-        # تو preview فیلتری اعمال نمی‌کنیم، همه‌ی اسلایدها با شماره می‌رن
-        selected_indices = list(range(1, total + 1))
-    else:
-        if slides_filter:
-            selected_indices = [int(x) for x in slides_filter.split(',') if x.strip().isdigit()]
-        else:
-            selected_indices = list(range(1, total + 1))
+    def send_media(filepath, caption, keyboard):
+        is_video = filepath.lower().endswith('.mp4')
+        method = 'sendVideo' if is_video else 'sendPhoto'
+        field = 'video' if is_video else 'photo'
+        with open(filepath, 'rb') as f:
+            tg_bot_call(method, {
+                'chat_id': chat_id,
+                'caption': caption,
+                'reply_markup': json.dumps(keyboard),
+            }, files={field: f})
 
-    items = []
+    if total == 1:
+        keyboard = {'inline_keyboard': [[
+            {'text': '✅ تایید', 'callback_data': f'cf:{shortcode}'},
+            {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
+        ]]}
+        send_media(files[0], f'shortcode: {shortcode}', keyboard)
+        return
+
     for idx, filepath in enumerate(files, start=1):
-        if idx not in selected_indices:
-            continue
-        if mode == 'preview':
-            caption = f'اسلاید {idx}/{total} — shortcode: {shortcode}'
-        else:
-            caption = build_caption_instagram(source_username)
-        items.append({
-            'filepath': filepath,
-            'caption': caption,
-        })
+        keyboard = {'inline_keyboard': [[
+            {'text': f'☐ اسلاید {idx}', 'callback_data': f'tg:{shortcode}:{idx}'}
+        ]]}
+        send_media(filepath, f'اسلاید {idx}/{total} — {shortcode}', keyboard)
 
-    if not items:
-        print('❌ بعد از فیلتر اسلایدها چیزی برای ارسال نموند')
-        sys.exit(1)
-
-    return items
+    confirm_keyboard = {'inline_keyboard': [[
+        {'text': '✅ تایید و ارسال', 'callback_data': f'cf:{shortcode}'},
+        {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
+    ]]}
+    tg_bot_call('sendMessage', {
+        'chat_id': chat_id,
+        'text': f'کروسل ({total} اسلاید) — {shortcode}\n\nاسلایدهای موردنظر رو تیک بزن، بعد «تایید و ارسال» رو بزن.',
+        'reply_markup': json.dumps(confirm_keyboard),
+    })
 
 
 # ─────────────────────────────────────────
@@ -252,29 +286,54 @@ def main():
     parser.add_argument('--mode', default='send', choices=['preview', 'send'])
     args = parser.parse_args()
 
-    if not (TG_API_ID and TG_API_HASH and TG_SESSION_STRING):
-        print('❌ TG_API_ID / TG_API_HASH / TG_SESSION_STRING تنظیم نشده (باید GitHub Secrets باشن)')
-        sys.exit(1)
-
     url = args.url.strip()
     chat_id = args.chat_id.strip()
 
     print(f'🌐 حالت: {args.mode}')
 
-    items = download_instagram(url, args.ig_session, args.slides.strip(), args.mode)
-
-    for item in items:
-        size_mb = os.path.getsize(item['filepath']) / 1024 / 1024
-        print(f"✅ آماده ارسال: {item['filepath']} ({size_mb:.1f} MB)")
-
-    print(f'📨 در حال ارسال به تلگرام (chat_id={chat_id}, تعداد آیتم={len(items)})...')
     try:
-        sent = asyncio.run(send_items_to_telegram(items, chat_id))
-        ids = ', '.join(str(s.id) for s in sent)
-        print(f'✅ ارسال شد. message_id(s)={ids}')
-    except FloodWaitError as e:
-        print(f'⏳ FloodWait: باید {e.seconds} ثانیه صبر کرد')
-        sys.exit(2)
+        files, shortcode, source_username = download_instagram(url, args.ig_session)
+        print(f'📦 {len(files)} فایل دانلود شد (shortcode={shortcode}).')
+
+        if args.mode == 'preview':
+            print(f'📨 ارسال پیش‌نمایش با دکمه به chat_id={chat_id} (از طریق بات)...')
+            send_preview(files, shortcode, chat_id)
+            print('✅ پیش‌نمایش ارسال شد.')
+            return
+
+        # mode == send
+        if not (TG_API_ID and TG_API_HASH and TG_SESSION_STRING):
+            print('❌ TG_API_ID / TG_API_HASH / TG_SESSION_STRING تنظیم نشده (باید GitHub Secrets باشن)')
+            sys.exit(1)
+
+        slides_filter = args.slides.strip()
+        if slides_filter:
+            selected_indices = [int(x) for x in slides_filter.split(',') if x.strip().isdigit()]
+        else:
+            selected_indices = list(range(1, len(files) + 1))
+
+        caption = build_caption_instagram(source_username)
+        items = [
+            {'filepath': f, 'caption': caption}
+            for idx, f in enumerate(files, start=1)
+            if idx in selected_indices
+        ]
+        if not items:
+            print('❌ بعد از فیلتر اسلایدها چیزی برای ارسال نموند')
+            sys.exit(1)
+
+        for item in items:
+            size_mb = os.path.getsize(item['filepath']) / 1024 / 1024
+            print(f"✅ آماده ارسال: {item['filepath']} ({size_mb:.1f} MB)")
+
+        print(f'📨 در حال ارسال نهایی به تلگرام (chat_id={chat_id}, تعداد آیتم={len(items)})...')
+        try:
+            sent = asyncio.run(send_items_to_telegram(items, chat_id))
+            ids = ', '.join(str(s.id) for s in sent)
+            print(f'✅ ارسال شد. message_id(s)={ids}')
+        except FloodWaitError as e:
+            print(f'⏳ FloodWait: باید {e.seconds} ثانیه صبر کرد')
+            sys.exit(2)
     finally:
         shutil.rmtree(WORKDIR, ignore_errors=True)
 
