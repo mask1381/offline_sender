@@ -1,0 +1,39 @@
+name: Mark Post As Seen (after decision)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shortcode:
+        description: 'shortcode پستی که روش تصمیم (تایید/رد) گرفته شده'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  mark-seen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Mark shortcode as seen
+        run: |
+          python scripts/mark_seen.py \
+            --shortcode "${{ inputs.shortcode }}" \
+            --seen-file data/seen_posts.json
+
+      - name: Commit updated seen_posts.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/seen_posts.json
+          git diff --staged --quiet && echo "چیزی برای کامیت نیست." || git commit -m "chore: mark ${{ inputs.shortcode }} as seen [skip ci]"
+          git push
