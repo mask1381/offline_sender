@@ -21,6 +21,7 @@ import sys
 import tempfile
 
 import requests
+from PIL import Image
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
@@ -43,6 +44,9 @@ IG_PROXY_URL = os.environ.get("IG_PROXY_URL", "").strip()
 
 # کدام مرورگر واقعی برای جعل TLS fingerprint شبیه‌سازی بشه (curl_cffi)
 CURL_CFFI_IMPERSONATE = os.environ.get("CURL_CFFI_IMPERSONATE", "chrome124").strip()
+
+# درصدی از پایین هر عکس که کراپ بشه (نوار سورس/سواپ اینستاگرام معمولاً همونجاست)
+CROP_BOTTOM_PERCENT = float(os.environ.get("CROP_BOTTOM_PERCENT", "0.10"))
 
 WORKDIR = tempfile.mkdtemp(prefix="job_")
 
@@ -202,6 +206,22 @@ def build_instaloader_instance(ig_session_path: str):
 
 
 # ─────────────────────────────────────────
+# کراپ کردن پایین عکس (نوار سورس/swipe رو حذف می‌کنه)
+# ─────────────────────────────────────────
+def crop_bottom(filepath: str, percent: float = CROP_BOTTOM_PERCENT) -> str:
+    if percent <= 0 or not filepath.lower().endswith(('.jpg', '.jpeg', '.png')):
+        return filepath
+    try:
+        img = Image.open(filepath)
+        w, h = img.size
+        new_h = max(1, int(h * (1 - percent)))
+        img.crop((0, 0, w, new_h)).save(filepath)
+    except Exception as e:
+        print(f'⚠️ کراپ عکس {filepath} شکست خورد: {e}')
+    return filepath
+
+
+# ─────────────────────────────────────────
 # دانلود اینستاگرام با instaloader (پشتیبانی از کروسل چند اسلایدی)
 # فقط دانلود خام — تصمیم درباره‌ی فیلتر/کپشن به‌عهده‌ی main() است
 # ─────────────────────────────────────────
@@ -226,6 +246,8 @@ def download_instagram(url: str, ig_session_path: str):
     if not files:
         print('❌ هیچ فایلی دانلود نشد')
         sys.exit(1)
+
+    files = [crop_bottom(f) for f in files]
 
     return files, shortcode, source_username
 
