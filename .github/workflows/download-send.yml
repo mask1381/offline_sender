@@ -68,6 +68,7 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
         run: |
           python scripts/download_and_send.py \
