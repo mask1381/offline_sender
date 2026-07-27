@@ -1,0 +1,48 @@
+name: Test Instagram Session
+
+on:
+  workflow_dispatch:
+    inputs:
+      post_url:
+        description: 'لینک پست اینستاگرام برای تست (فقط برای گرفتن اطلاعات، دانلود/ارسال نمی‌کنه)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # نسخه‌ی رسمی PyPI فعلاً باگ doc_id (اینستاگرام ژوئن ۲۰۲۶ عوضش کرد) رو نداره،
+      # پس مستقیم از برنچ fix (PR #2706) نصب می‌کنیم.
+      - name: Install instaloader (with doc_id fix, PR #2706)
+        run: |
+          pip install "git+https://github.com/instaloader/instaloader.git@refs/pull/2706/head"
+
+      - name: Setup Instagram session
+        run: |
+          if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
+            echo "🛑 secret به اسم INSTAGRAM_SESSION_B64 تنظیم نشده."
+            exit 1
+          fi
+          echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
+
+      - name: Run session test
+        env:
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+        run: |
+          python scripts/test_session_v2.py \
+            -f ig_session.bin \
+            -u "$IG_USERNAME" \
+            -p "${{ inputs.post_url }}"
