@@ -165,13 +165,14 @@ def main():
     if not new_posts:
         return
 
+    # نکته‌ی مهم: اینجا shortcode رو seen نمی‌کنیم! تا وقتی تصمیم (تایید/رد)
+    # از طریق دکمه‌های تلگرام گرفته نشده، پست باید تو چک‌های بعدی دوباره
+    # دیده بشه و پیش‌نمایشش دوباره بره (مثلاً اگه پیام پیش‌نمایش رو ندیدی یا
+    # فراموش کردی تصمیم بگیری). علامت seen توسط workflow جدا
+    # (mark-seen.yml) و فقط بعد از Confirm/Reject تو n8n زده می‌شه.
     for post in new_posts:
         print(f"🚀 دیسپچ دانلود برای {post['url']} (shortcode={post['shortcode']})")
-        ok = dispatch_download_workflow(args.repo, post['url'], args.chat_id, args.mode)
-        if ok:
-            seen.add(post['shortcode'])
-            save_seen(args.seen_file, seen)
-            print(f"✅ {post['shortcode']} به seen اضافه شد.")
+        dispatch_download_workflow(args.repo, post['url'], args.chat_id, args.mode)
         # فاصله‌ی کوچیک بین دیسپچ‌ها، مؤدبانه با API گیت‌هاب
         time.sleep(3)
 
