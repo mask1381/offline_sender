@@ -1,4 +1,4 @@
 telethon
 requests
 cryptg
-instaloader
+git+https://github.com/instaloader/instaloader.git@refs/pull/2706/head
