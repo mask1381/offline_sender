@@ -235,7 +235,7 @@ def build_instaloader_instance(ig_session_path: str):
 
 
 # ─────────────────────────────────────────
-# کراپ کردن پایین عکس (نوار سورس/swipe رو حذف می‌کنه)
+# کراپ کردن پایین عکس (نوار سورس/swipe اینستاگرام معمولاً همونجاست)
 # ─────────────────────────────────────────
 def crop_bottom(filepath: str, percent: float = CROP_BOTTOM_PERCENT) -> str:
     if percent <= 0 or not filepath.lower().endswith(('.jpg', '.jpeg', '.png')):
@@ -389,18 +389,40 @@ async def send_items_to_telegram(items, chat_id):
 
     sent_messages = []
     try:
-        for item in items:
-            attributes = [DocumentAttributeFilename(os.path.basename(item['filepath']))]
+        # اگر همه فایل‌ها عکس/ویدیو هستن و تعداد بین 2 تا 10 هست، ارسال در یک آلبوم
+        filepaths = [item['filepath'] for item in items]
+        def is_media(fp):
+            return fp.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4'))
 
+        if len(filepaths) > 1 and all(is_media(p) for p in filepaths) and len(filepaths) <= 10:
+            # caption فقط برای فایل اول اعمال می‌شه (محدودیت تلگرام)
+            caption = items[0].get('caption') if items else None
             sent = await client.send_file(
                 chat_id_value,
-                item['filepath'],
-                caption=item['caption'],
+                filepaths,
+                caption=caption,
                 parse_mode='html',
                 supports_streaming=True,
-                attributes=attributes,
             )
-            sent_messages.append(sent)
+            # Telethon ممکنه یه لیست پیام برگردونه یا یه پیام منفرد
+            if isinstance(sent, list):
+                sent_messages.extend(sent)
+            else:
+                sent_messages.append(sent)
+        else:
+            # fallback: ارسال تک‌تک (برای فایل‌های غیر مدیا یا وقتی بیش از 10 فایل باشه)
+            for item in items:
+                attributes = [DocumentAttributeFilename(os.path.basename(item['filepath']))]
+
+                sent = await client.send_file(
+                    chat_id_value,
+                    item['filepath'],
+                    caption=item['caption'],
+                    parse_mode='html',
+                    supports_streaming=True,
+                    attributes=attributes,
+                )
+                sent_messages.append(sent)
     finally:
         await client.disconnect()
 
