@@ -107,7 +107,7 @@ def build_caption_instagram(source_username: str, original_caption: str = '') ->
     return header + body + footer
 
 
-# ─────────────────────────────────────────
+# ────────────────────────────���────────────
 # جایگزینی requests.Session داخلی instaloader با یه session از curl_cffi
 # که رفتار TLS/HTTP2 مرورگر واقعی رو جعل می‌کنه (fingerprint spoofing)
 # + وصل کردن پراکسی رزیدنشیال (اگه تنظیم شده باشه)
@@ -422,7 +422,7 @@ def main():
     print(f'🌐 حالت: {args.mode}')
 
     try:
-        files, shortcode, source_username = download_instagram(url, args.ig_session)
+        files, shortcode, source_username, original_caption = download_instagram(url, args.ig_session)
         print(f'📦 {len(files)} فایل دانلود شد (shortcode={shortcode}).')
 
         if args.mode == 'preview':
@@ -442,7 +442,7 @@ def main():
         else:
             selected_indices = list(range(1, len(files) + 1))
 
-        caption = build_caption_instagram(source_username)
+        caption = build_caption_instagram(source_username, original_caption)
         items = [
             {'filepath': f, 'caption': caption}
             for idx, f in enumerate(files, start=1)
