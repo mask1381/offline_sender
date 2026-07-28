@@ -5,7 +5,15 @@
 
 دو حالت اجرا (--mode):
   - preview : همه‌ی اسلایدهای پست رو با شماره به یه چت پیش‌نمایش می‌فرسته (برای تایید دستی)
-  - send    : فقط اسلایدهای انتخابی (--slides) رو با کپشن نهایی به کانال اصلی می‌فرسته
+              و برای هر اسلاید یه ردیف با selected=true تو n8n Data Table (از طریق
+              وبهوک REGISTER_SLIDE_WEBHOOK_URL) ثبت می‌کنه -> یعنی پیش‌فرض «همه انتخابن»
+              و کاربر با تیک زدن، اسلاید غیرلازم رو از حالت انتخاب خارج می‌کنه.
+  - send    : فقط اسلایدهای انتخابی (--slides) رو با کپشن واقعیِ خودِ پست (فرمت‌شده)
+              به‌صورت آلبوم (media group) به کانال اصلی می‌فرسته.
+
+نکته‌ی مهم درباره‌ی --slides خالی: دیگه به‌معنی «همه» نیست! اگه خالی برسه یعنی
+هیچ اسلایدی برای ارسال انتخاب نشده -> اسکریپت خطا می‌ده و از ارسال ناخواسته‌ی
+همه‌ی اسلایدها جلوگیری می‌کنه.
 
 بعد از اجرا، این اسکریپت و کل VM موقتِ GitHub از بین می‌ره - هیچ سروری باقی نمی‌مونه.
 """
@@ -38,6 +46,10 @@ IG_USERNAME = os.environ.get("IG_USERNAME")
 # توکن بات (فقط برای پیش‌نمایش با دکمه — ارسال نهایی همچنان با اکانت شخصی/Telethon است)
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 
+# آدرس وبهوک n8n که با هر اسلاید ارسالی، یه ردیف selected=true تو Data Table
+# ثبت می‌کنه (تا پیش‌فرض «همه انتخاب‌شده» باشه، نه «هیچ‌کدوم»)
+REGISTER_SLIDE_WEBHOOK_URL = os.environ.get("REGISTER_SLIDE_WEBHOOK_URL", "").strip()
+
 # پراکسی رزیدنشیال برای عبور از بلاک IP دیتاسنتری گیت‌هاب
 # فرمت: http://user:pass@host:port   یا   socks5://user:pass@host:port
 IG_PROXY_URL = os.environ.get("IG_PROXY_URL", "").strip()
@@ -67,15 +79,32 @@ def bi(text: str) -> str:
 
 # ─────────────────────────────────────────
 # منطق کپشن اینستاگرام (لیک/ریپورت با کردیت پیج منبع)
+# کپشن واقعیِ خودِ پست اینستا رو می‌گیره و داخل قالب برند خودمون می‌ذاره
 # ─────────────────────────────────────────
-def build_caption_instagram(source_username: str) -> str:
-    caption = f"⚡️ <b>{bi('TEYVAT LEAK')}</b>\n\n"
-    caption += (
-        f"🔗 {bi('Source')}: "
+MAX_TG_CAPTION_LEN = 1024  # محدودیت خود تلگرام برای caption عکس/ویدیو/آلبوم
+
+
+def build_caption_instagram(source_username: str, original_caption: str = '') -> str:
+    header = f"⚡️ <b>{bi('TEYVAT LEAK')}</b>\n\n"
+    footer = (
+        f"\n\n🔗 {bi('Source')}: "
         f'<a href="https://www.instagram.com/{source_username}">@{source_username}</a>\n\n'
+        f'🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
     )
-    caption += f'🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
-    return caption
+
+    original_caption = (original_caption or '').strip()
+    if not original_caption:
+        return header.rstrip() + footer
+
+    # جا برای original_caption داخل quote، با توجه به سقف کاراکتر تلگرام
+    budget = MAX_TG_CAPTION_LEN - len(header) - len(footer) - len('<blockquote></blockquote>') - 10
+    if budget < 20:
+        budget = 20
+    if len(original_caption) > budget:
+        original_caption = original_caption[:budget].rstrip() + '…'
+
+    body = f'<blockquote>{original_caption}</blockquote>'
+    return header + body + footer
 
 
 # ─────────────────────────────────────────
@@ -238,6 +267,10 @@ def download_instagram(url: str, ig_session_path: str):
 
     post = instaloader.Post.from_shortcode(L.context, shortcode)
     source_username = post.owner_username
+    try:
+        original_caption = post.caption or ''
+    except Exception:
+        original_caption = ''
 
     L.download_post(post, target=WORKDIR)
 
@@ -249,7 +282,7 @@ def download_instagram(url: str, ig_session_path: str):
 
     files = [crop_bottom(f) for f in files]
 
-    return files, shortcode, source_username
+    return files, shortcode, source_username, original_caption
 
 
 # ─────────────────────────────────────────
@@ -269,43 +302,80 @@ def tg_bot_call(method: str, data: dict, files=None):
     return result['result']
 
 
+def register_slide(shortcode, slide_index, chat_id, message_id):
+    """
+    به‌محض ارسال هر پیام اسلاید، بلافاصله یه ردیف selected=true تو
+    n8n Data Table ثبت می‌کنه (از طریق وبهوک). این یعنی پیش‌فرض واقعی
+    «همه اسلایدها انتخاب‌شده‌اند»، نه «هیچ‌کدوم» - دقیقاً هم‌سو با
+    دکمه‌ای که با تیک خورده (✅) نشونش می‌دیم.
+    اگه REGISTER_SLIDE_WEBHOOK_URL تنظیم نشده باشه فقط هشدار می‌ده و
+    ادامه می‌ده (سیستم قدیمی toggle-on-first-click هنوز کار می‌کنه، ولی
+    پیش‌فرض دیگه «همه» نخواهد بود مگراینکه این وبهوک وصل باشه).
+    """
+    if not REGISTER_SLIDE_WEBHOOK_URL:
+        print('⚠️ REGISTER_SLIDE_WEBHOOK_URL تنظیم نشده — پیش‌فرض انتخاب اسلایدها ثبت نمی‌شه')
+        return
+    try:
+        requests.post(REGISTER_SLIDE_WEBHOOK_URL, json={
+            'shortcode': shortcode,
+            'slide_index': str(slide_index),
+            'chat_id': str(chat_id),
+            'message_id': str(message_id),
+            'selected': True,
+        }, timeout=15)
+    except Exception as e:
+        print(f'⚠️ ثبت اسلاید {slide_index} تو دیتا تیبل شکست خورد: {e}')
+
+
 def send_preview(files, shortcode, chat_id):
     total = len(files)
+    control_message_ids = []  # پیام‌های کنترلی (تایید/رد) که باید بعد از اتمام پاک بشن
 
     def send_media(filepath, caption, keyboard):
         is_video = filepath.lower().endswith('.mp4')
         method = 'sendVideo' if is_video else 'sendPhoto'
         field = 'video' if is_video else 'photo'
         with open(filepath, 'rb') as f:
-            tg_bot_call(method, {
+            result = tg_bot_call(method, {
                 'chat_id': chat_id,
                 'caption': caption,
                 'reply_markup': json.dumps(keyboard),
             }, files={field: f})
+        return result['message_id']
 
     if total == 1:
         keyboard = {'inline_keyboard': [[
             {'text': '✅ تایید', 'callback_data': f'cf:{shortcode}'},
             {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
         ]]}
-        send_media(files[0], f'shortcode: {shortcode}', keyboard)
+        mid = send_media(files[0], f'shortcode: {shortcode}', keyboard)
+        # تک‌عکسی هم به‌عنوان اسلاید ۱ (انتخاب‌شده) ثبت می‌شه تا بعداً قابل پاک‌شدن باشه
+        register_slide(shortcode, 1, chat_id, mid)
         return
 
     for idx, filepath in enumerate(files, start=1):
         keyboard = {'inline_keyboard': [[
-            {'text': f'☐ اسلاید {idx}', 'callback_data': f'tg:{shortcode}:{idx}'}
+            {'text': f'✅ اسلاید {idx}', 'callback_data': f'tg:{shortcode}:{idx}'}
         ]]}
-        send_media(filepath, f'اسلاید {idx}/{total} — {shortcode}', keyboard)
+        mid = send_media(filepath, f'اسلاید {idx}/{total} — {shortcode}', keyboard)
+        register_slide(shortcode, idx, chat_id, mid)
 
     confirm_keyboard = {'inline_keyboard': [[
         {'text': '✅ تایید و ارسال', 'callback_data': f'cf:{shortcode}'},
         {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
     ]]}
-    tg_bot_call('sendMessage', {
+    ctrl = tg_bot_call('sendMessage', {
         'chat_id': chat_id,
-        'text': f'کروسل ({total} اسلاید) — {shortcode}\n\nاسلایدهای موردنظر رو تیک بزن، بعد «تایید و ارسال» رو بزن.',
+        'text': (
+            f'کروسل ({total} اسلاید) — {shortcode}\n\n'
+            'همه‌ی اسلایدها الان به‌صورت پیش‌فرض ✅ انتخابن. '
+            'روی اسلایدهایی که نمی‌خوای بزن تا از حالت انتخاب خارج بشن (☐)، بعد «تایید و ارسال» رو بزن.'
+        ),
         'reply_markup': json.dumps(confirm_keyboard),
     })
+    # پیام کنترلی هم به‌عنوان یه ردیف مخصوص ثبت می‌شه (slide_index="_control")
+    # تا موقع پاک‌سازی نهایی، این پیام هم حذف بشه
+    register_slide(shortcode, '_control', chat_id, ctrl['message_id'])
 
 
 # ─────────────────────────────────────────
