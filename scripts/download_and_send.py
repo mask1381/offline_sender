@@ -84,26 +84,38 @@ def bi(text: str) -> str:
 MAX_TG_CAPTION_LEN = 1024  # محدودیت خود تلگرام برای caption عکس/ویدیو/آلبوم
 
 
+def _caption_has_meaningful_text(caption: str) -> bool:
+    """Heuristic: remove URLs/mentions/hashtags and count remaining words."""
+    if not caption:
+        return False
+    text = re.sub(r'https?://\S+', '', caption)
+    text = re.sub(r'[@#]\S+', '', text)
+    # Keep words with at least one alphabet/digit (unicode aware simplified)
+    words = re.findall(r"[\w\u0600-\u06FF]+", text)  # include Persian/Arabic letters
+    return len(words) >= 5
+
+
 def build_caption_instagram(source_username: str, original_caption: str = '') -> str:
     header = f"⚡️ <b>{bi('TEYVAT LEAK')}</b>\n\n"
-    footer = (
-        f"\n\n🔗 {bi('Source')}: "
-        f'<a href="https://www.instagram.com/{source_username}">@{source_username}</a>\n\n'
-        f'🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
-    )
 
     original_caption = (original_caption or '').strip()
-    if not original_caption:
-        return header.rstrip() + footer
 
-    # جا برای original_caption داخل quote، با توجه به سقف کاراکتر تلگرام
-    budget = MAX_TG_CAPTION_LEN - len(header) - len(footer) - len('<blockquote></blockquote>') - 10
-    if budget < 20:
-        budget = 20
-    if len(original_caption) > budget:
-        original_caption = original_caption[:budget].rstrip() + '…'
+    body = ''
+    # اگر کپشن معنادار باشه، داخل blockquote قرار می‌دیم
+    if original_caption and _caption_has_meaningful_text(original_caption):
+        # محاسبه بودجه باقیمانده برای جلوگیری از overflow
+        footer_stub = '\n\n#leak\n🌸 <a href="https://t.me/genshinworldsensei">GWS | Teyvat Archive</a>'
+        budget = MAX_TG_CAPTION_LEN - len(header) - len(footer_stub) - len('<blockquote></blockquote>') - 10
+        if budget < 20:
+            budget = 20
+        oc = original_caption
+        if len(oc) > budget:
+            oc = oc[:budget].rstrip() + '…'
+        body = f'<blockquote>{oc}</blockquote>\n\n'
 
-    body = f'<blockquote>{original_caption}</blockquote>'
+    # ساختار نهایی: header + optional body + #leak + GWS link
+    footer = '#leak\n🌸 <a href="https://t.me/genshinworldsensei">GWS | Teyvat Archive</a>'
+
     return header + body + footer
 
 
@@ -236,7 +248,7 @@ def build_instaloader_instance(ig_session_path: str):
 
 # ─────────────────────────────────────────
 # کراپ کردن پایین عکس (نوار سورس/swipe اینستاگرام معمولاً همونجاست)
-# ─────────────────────────────────────────
+# ───────────────────────────────────────���─
 def crop_bottom(filepath: str, percent: float = CROP_BOTTOM_PERCENT) -> str:
     if percent <= 0 or not filepath.lower().endswith(('.jpg', '.jpeg', '.png')):
         return filepath
