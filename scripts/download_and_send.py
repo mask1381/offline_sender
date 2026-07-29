@@ -95,20 +95,64 @@ def _caption_has_meaningful_text(caption: str) -> bool:
     return len(words) >= 5
 
 
+def clean_original_caption(caption: str) -> str:
+    """
+    Remove boilerplate/CTA blocks from an Instagram post caption.
+
+    Rules:
+    - Split caption into blocks by double-newline (\n\n).
+    - Remove any block that starts (case-insensitive) with one of known prefixes
+      such as "✦ Cover Art", "✦ Hashtags", "↠ Leaks and News", "↠ Like & Follow".
+    - Rejoin remaining blocks with \n\n and return.
+    - If caption is falsy, return empty string.
+    """
+    if not caption:
+        return ""
+
+    blocks = [blk.strip() for blk in caption.split("\n\n")]
+
+    remove_prefixes = [
+        "✦ Cover Art",
+        "✦ Hashtags",
+        "↠ Leaks and News",
+        "↠ Like & Follow",
+        "↠ Leaks",
+        "↠ Like",
+    ]
+
+    cleaned_blocks = []
+    for blk in blocks:
+        if not blk:
+            continue
+        lower_blk = blk.lower()
+        should_remove = False
+        for pref in remove_prefixes:
+            if lower_blk.startswith(pref.lower()):
+                should_remove = True
+                break
+        if not should_remove:
+            cleaned_blocks.append(blk)
+
+    return "\n\n".join(cleaned_blocks).strip()
+
+
 def build_caption_instagram(source_username: str, original_caption: str = '') -> str:
     header = f"⚡️ <b>{bi('TEYVAT LEAK')}</b>\n\n"
 
     original_caption = (original_caption or '').strip()
 
     body = ''
+    # Clean the original caption from boilerplate blocks before deciding
+    cleaned_caption = clean_original_caption(original_caption)
+
     # اگر کپشن معنادار باشه، داخل blockquote قرار می‌دیم
-    if original_caption and _caption_has_meaningful_text(original_caption):
+    if cleaned_caption and _caption_has_meaningful_text(cleaned_caption):
         # محاسبه بودجه باقیمانده برای جلوگیری از overflow
         footer_stub = '\n\n#leak\n🌸 <a href="https://t.me/genshinworldsensei">GWS | Teyvat Archive</a>'
         budget = MAX_TG_CAPTION_LEN - len(header) - len(footer_stub) - len('<blockquote></blockquote>') - 10
         if budget < 20:
             budget = 20
-        oc = original_caption
+        oc = cleaned_caption
         if len(oc) > budget:
             oc = oc[:budget].rstrip() + '…'
         body = f'<blockquote>{oc}</blockquote>\n\n'
@@ -248,7 +292,7 @@ def build_instaloader_instance(ig_session_path: str):
 
 # ─────────────────────────────────────────
 # کراپ کردن پایین عکس (نوار سورس/swipe اینستاگرام معمولاً همونجاست)
-# ───────────────────────────────────────���─
+# ─────────────────────────────────────────
 def crop_bottom(filepath: str, percent: float = CROP_BOTTOM_PERCENT) -> str:
     if percent <= 0 or not filepath.lower().endswith(('.jpg', '.jpeg', '.png')):
         return filepath
@@ -471,8 +515,15 @@ def main():
             sys.exit(1)
 
         slides_filter = args.slides.strip()
-        if slides_filter:
-            selected_indices = [int(x) for x in slides_filter.split(',') if x.strip().isdigit()]
+        if args.mode == 'send':
+            if slides_filter:
+                selected_indices = [int(x) for x in slides_filter.split(",") if x.strip().isdigit()]
+            else:
+                selected_indices = []
+
+            if not selected_indices:
+                print("❌ هیچ اسلایدی انتخاب نشده - از ارسال خودداری شد", file=sys.stderr)
+                sys.exit(1)
         else:
             selected_indices = list(range(1, len(files) + 1))
 
