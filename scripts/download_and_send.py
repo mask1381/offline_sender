@@ -416,16 +416,18 @@ def send_preview(files, shortcode, chat_id):
             {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
         ]]}
         mid = send_media(files[0], f'shortcode: {shortcode}', keyboard)
-        # تک‌عکسی هم به‌عنوان اسلاید ۱ (انتخاب‌شده) ثبت می‌شه تا بعداً قابل پاک‌شدن باشه
-        register_slide(shortcode, 1, chat_id, mid)
+        # تک‌عکسی به‌عنوان اسلاید ۱ و از قبل «انتخاب‌شده» ثبت می‌شه، چون
+        # اینجا چیزی برای انتخاب/رد وجود نداره - فقط تایید یا رد کل پست
+        register_slide(shortcode, 1, chat_id, mid, selected=True)
         return
 
     for idx, filepath in enumerate(files, start=1):
         keyboard = {'inline_keyboard': [[
-            {'text': f'✅ اسلاید {idx}', 'callback_data': f'tg:{shortcode}:{idx}'}
+            {'text': f'☐ اسلاید {idx}', 'callback_data': f'tg:{shortcode}:{idx}'}
         ]]}
         mid = send_media(filepath, f'اسلاید {idx}/{total} — {shortcode}', keyboard)
-        register_slide(shortcode, idx, chat_id, mid)
+        # opt-in: پیش‌فرض انتخاب نشده؛ کاربر با تپ کردن آن را انتخاب می‌کند
+        register_slide(shortcode, idx, chat_id, mid, selected=False)
 
     confirm_keyboard = {'inline_keyboard': [[
         {'text': '✅ تایید و ارسال', 'callback_data': f'cf:{shortcode}'},
@@ -435,14 +437,14 @@ def send_preview(files, shortcode, chat_id):
         'chat_id': chat_id,
         'text': (
             f'کروسل ({total} اسلاید) — {shortcode}\n\n'
-            'همه‌ی اسلایدها الان به‌صورت پیش‌فرض ✅ انتخابن. '
-            'روی اسلایدهایی که نمی‌خوای بزن تا از حالت انتخاب خارج بشن (☐)، بعد «تایید و ارسال» رو بزن.'
+            'به‌صورت پیش‌فرض هیچ اسلایدی انتخاب نشده. '
+            'روی اسلایدهایی که می‌خوای ارسال بشه بزن تا ✅ بشن، بعد «تایید و ارسال» رو بزن.'
         ),
         'reply_markup': json.dumps(confirm_keyboard),
     })
     # پیام کنترلی هم به‌عنوان یه ردیف مخصوص ثبت می‌شه (slide_index="_control")
     # تا موقع پاک‌سازی نهایی، این پیام هم حذف بشه
-    register_slide(shortcode, '_control', chat_id, ctrl['message_id'])
+    register_slide(shortcode, '_control', chat_id, ctrl['message_id'], selected=False)
 
 
 # ─────────────────────────────────────────
