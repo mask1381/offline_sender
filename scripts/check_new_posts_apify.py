@@ -45,10 +45,11 @@ def load_seen(seen_file: str) -> set:
     return set()
 
 
-def save_seen(seen_file: str, seen: set):
-    os.makedirs(os.path.dirname(seen_file) or '.', exist_ok=True)
-    with open(seen_file, 'w', encoding='utf-8') as f:
-        json.dump(sorted(seen), f, ensure_ascii=False, indent=2)
+# نکته: این اسکریپت عمداً save_seen ندارد / صدا نمی‌زند. پست‌ها فقط از طریق
+# scripts/mark_seen.py و بعد از تصمیم واقعی (تایید/رد در تلگرام) seen
+# می‌شوند — نه همین‌جا و نه فقط به‌خاطر دیسپچ پیش‌نمایش. اگر جایی نیاز به
+# ذخیره‌ی seen_posts.json پیدا کردی، از همان اسکریپت (mark_seen.py) استفاده
+# کن، نه این‌که این تابع را اینجا دوباره اضافه/صدا کنی.
 
 
 def fetch_recent_posts(profile: str, days: int, max_posts: int) -> list:
