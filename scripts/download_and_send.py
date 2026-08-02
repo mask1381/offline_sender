@@ -384,8 +384,15 @@ def register_slide(shortcode, slide_index, chat_id, message_id):
 
 
 def send_preview(files, shortcode, chat_id):
+    """
+    نکته درباره‌ی پاک‌سازی پیام‌ها: این تابع خودش هیچ پیامی رو پاک نمی‌کنه.
+    تک‌تک اسلایدها (و پیام کنترلی تایید/رد) از طریق register_slide() با
+    chat_id + message_id تو n8n Data Table ثبت می‌شن. پاک‌سازی واقعی
+    (Telegram deleteMessage برای همه‌ی این پیام‌ها) بعد از Confirm/Reject
+    تو خودِ ورک‌فلوی n8n انجام می‌شه (رو ردیف‌های ثبت‌شده‌ی همین shortcode)،
+    نه این‌جا.
+    """
     total = len(files)
-    control_message_ids = []  # پیام‌های کنترلی (تایید/رد) که باید بعد از اتمام پاک بشن
 
     def send_media(filepath, caption, keyboard):
         is_video = filepath.lower().endswith('.mp4')
