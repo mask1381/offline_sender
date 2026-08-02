@@ -358,18 +358,22 @@ def tg_bot_call(method: str, data: dict, files=None):
     return result['result']
 
 
-def register_slide(shortcode, slide_index, chat_id, message_id):
+def register_slide(shortcode, slide_index, chat_id, message_id, selected):
     """
-    به‌محض ارسال هر پیام اسلاید، بلافاصله یه ردیف selected=true تو
-    n8n Data Table ثبت می‌کنه (از طریق وبهوک). این یعنی پیش‌فرض واقعی
-    «همه اسلایدها انتخاب‌شده‌اند»، نه «هیچ‌کدوم» - دقیقاً هم‌سو با
-    دکمه‌ای که با تیک خورده (✅) نشونش می‌دیم.
-    اگه REGISTER_SLIDE_WEBHOOK_URL تنظیم نشده باشه فقط هشدار می‌ده و
-    ادامه می‌ده (سیستم قدیمی toggle-on-first-click هنوز کار می‌کنه، ولی
-    پیش‌فرض دیگه «همه» نخواهد بود مگراینکه این وبهوک وصل باشه).
+    به‌محض ارسال هر پیام اسلاید، بلافاصله یه ردیف تو n8n Data Table ثبت
+    می‌کنه (از طریق وبهوک register-slide).
+
+    مدل جدید opt-in است: برای پست‌های چندعکسی، هر اسلاید با selected=False
+    ثبت می‌شه (یعنی پیش‌فرض هیچ‌کدوم انتخاب نشده) و کاربر با تپ کردن روی
+    دکمه‌ی همون اسلاید در تلگرام آن را انتخاب می‌کند (تپ = انتخاب، نه حذفِ
+    انتخاب). برای پست تک‌عکسی چون گزینه‌ای برای انتخاب وجود ندارد، همان
+    یک اسلاید با selected=True ثبت می‌شود تا با زدن «تایید» مستقیم ارسال شود.
+
+    اگر REGISTER_SLIDE_WEBHOOK_URL تنظیم نشده باشد یا وبهوک n8n در دسترس
+    نباشد، فقط هشدار چاپ می‌شود و ادامه می‌دهد.
     """
     if not REGISTER_SLIDE_WEBHOOK_URL:
-        print('⚠️ REGISTER_SLIDE_WEBHOOK_URL تنظیم نشده — پیش‌فرض انتخاب اسلایدها ثبت نمی‌شه')
+        print('⚠️ REGISTER_SLIDE_WEBHOOK_URL تنظیم نشده — ثبت اسلاید انجام نشد')
         return
     try:
         requests.post(REGISTER_SLIDE_WEBHOOK_URL, json={
@@ -377,7 +381,7 @@ def register_slide(shortcode, slide_index, chat_id, message_id):
             'slide_index': str(slide_index),
             'chat_id': str(chat_id),
             'message_id': str(message_id),
-            'selected': True,
+            'selected': selected,
         }, timeout=15)
     except Exception as e:
         print(f'⚠️ ثبت اسلاید {slide_index} تو دیتا تیبل شکست خورد: {e}')
