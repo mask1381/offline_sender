@@ -70,6 +70,7 @@ jobs:
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          REGISTER_SLIDE_WEBHOOK_URL: ${{ secrets.REGISTER_SLIDE_WEBHOOK_URL }}
         run: |
           python scripts/download_and_send.py \
             --url "${{ inputs.url }}" \
