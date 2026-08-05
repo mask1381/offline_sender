@@ -336,7 +336,10 @@ def download_instagram(url: str, ig_session_path: str):
         print('❌ هیچ فایلی دانلود نشد')
         sys.exit(1)
 
-    files = [crop_bottom(f) for f in files]
+    # نکته: اینجا دیگه کراپ نمی‌شه! کراپ حالا یه تصمیمِ دستیه که کاربر موقع
+    # preview با دکمه‌ی toggle مشخص می‌کنه (نه یه درصد ثابت روی همه‌چیز).
+    # فقط تو main()، وقتی mode=send و --crop true باشه، همینجا (crop_bottom)
+    # روی فایل‌های نهاییِ انتخاب‌شده اجرا می‌شه.
 
     return files, shortcode, source_username, original_caption
 
@@ -358,7 +361,7 @@ def tg_bot_call(method: str, data: dict, files=None):
     return result['result']
 
 
-def register_slide(shortcode, slide_index, chat_id, message_id, selected):
+def register_slide(shortcode, slide_index, chat_id, message_id, selected, username=''):
     """
     به‌محض ارسال هر پیام اسلاید، بلافاصله یه ردیف تو n8n Data Table ثبت
     می‌کنه (از طریق وبهوک register-slide).
@@ -382,12 +385,13 @@ def register_slide(shortcode, slide_index, chat_id, message_id, selected):
             'chat_id': str(chat_id),
             'message_id': str(message_id),
             'selected': selected,
+            'username': username or '',
         }, timeout=15)
     except Exception as e:
         print(f'⚠️ ثبت اسلاید {slide_index} تو دیتا تیبل شکست خورد: {e}')
 
 
-def send_preview(files, shortcode, chat_id):
+def send_preview(files, shortcode, chat_id, username=''):
     """
     نکته درباره‌ی پاک‌سازی پیام‌ها: این تابع خودش هیچ پیامی رو پاک نمی‌کنه.
     تک‌تک اسلایدها (و پیام کنترلی تایید/رد) از طریق register_slide() با
@@ -418,7 +422,7 @@ def send_preview(files, shortcode, chat_id):
         mid = send_media(files[0], f'shortcode: {shortcode}', keyboard)
         # تک‌عکسی به‌عنوان اسلاید ۱ و از قبل «انتخاب‌شده» ثبت می‌شه، چون
         # اینجا چیزی برای انتخاب/رد وجود نداره - فقط تایید یا رد کل پست
-        register_slide(shortcode, 1, chat_id, mid, selected=True)
+        register_slide(shortcode, 1, chat_id, mid, selected=True, username=username)
         return
 
     for idx, filepath in enumerate(files, start=1):
