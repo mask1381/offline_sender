@@ -136,7 +136,19 @@ def clean_original_caption(caption: str) -> str:
     return "\n\n".join(cleaned_blocks).strip()
 
 
-def build_caption_instagram(source_username: str, original_caption: str = '') -> str:
+# برند/فوتر هر یک از ۵ کانال مقصد — بر اساس chat_id انتخابی موقع تایید
+CHANNEL_BRANDING = {
+    '-1004312050043': ('#wallpaper', 'https://t.me/genshinworldwallpaper', 'GWW | Teyvat Archive'),
+    '-1002718837879': ('#leak', 'https://t.me/genshinworldsensei', 'GWS | Teyvat Archive'),
+    '-1004325251576': ('#anime', 'https://t.me/animeworldwallpape', 'AWW | Wallpapers Archive'),
+    '-1004401084373': ('#waifu', 'https://t.me/waifupi', 'WWA | Waifu World Art'),
+    '-1003922226618': ('#fanart', 'https://t.me/genshinworldart', 'GWA | Teyvat Archive'),
+}
+DEFAULT_BRANDING = ('#leak', 'https://t.me/genshinworldsensei', 'GWS | Teyvat Archive')
+
+
+def build_caption_instagram(source_username: str, original_caption: str = '', channel_id: str = '') -> str:
+    hashtag, link, link_label = CHANNEL_BRANDING.get(str(channel_id).strip(), DEFAULT_BRANDING)
     header = f"⚡️ <b>{bi('TEYVAT LEAK')}</b>\n\n"
 
     original_caption = (original_caption or '').strip()
@@ -146,9 +158,11 @@ def build_caption_instagram(source_username: str, original_caption: str = '') ->
     cleaned_caption = clean_original_caption(original_caption)
 
     # اگر کپشن معنادار باشه، داخل blockquote قرار می‌دیم
+    footer = f'{hashtag}\n🌸 <a href="{link}">{link_label}</a>'
+
     if cleaned_caption and _caption_has_meaningful_text(cleaned_caption):
         # محاسبه بودجه باقیمانده برای جلوگیری از overflow
-        footer_stub = '\n\n#leak\n🌸 <a href="https://t.me/genshinworldsensei">GWS | Teyvat Archive</a>'
+        footer_stub = f'\n\n{footer}'
         budget = MAX_TG_CAPTION_LEN - len(header) - len(footer_stub) - len('<blockquote></blockquote>') - 10
         if budget < 20:
             budget = 20
@@ -157,9 +171,7 @@ def build_caption_instagram(source_username: str, original_caption: str = '') ->
             oc = oc[:budget].rstrip() + '…'
         body = f'<blockquote>{oc}</blockquote>\n\n'
 
-    # ساختار نهایی: header + optional body + #leak + GWS link
-    footer = '#leak\n🌸 <a href="https://t.me/genshinworldsensei">GWS | Teyvat Archive</a>'
-
+    # ساختار نهایی: header + optional body + هشتگ/فوتر مخصوص همین کانال
     return header + body + footer
 
 
@@ -431,10 +443,22 @@ def send_preview(files, shortcode, chat_id, username=''):
         ]]}
         mid = send_media(filepath, f'اسلاید {idx}/{total} — {shortcode}', keyboard)
         # opt-in: پیش‌فرض انتخاب نشده؛ کاربر با تپ کردن آن را انتخاب می‌کند
-        register_slide(shortcode, idx, chat_id, mid, selected=False)
+        register_slide(shortcode, idx, chat_id, mid, selected=False, username=username)
+
+    # دکمه‌ی جدا برای toggle کراپ (پیش‌فرض خاموش) — با همون الگوی toggle که
+    # n8n برای اسلایدها می‌شناسه، فقط با پیشوند cp: و slide_index="_crop"
+    crop_keyboard = {'inline_keyboard': [[
+        {'text': '☐ کراپ غیرفعال', 'callback_data': f'cp:{shortcode}'}
+    ]]}
+    crop_msg = tg_bot_call('sendMessage', {
+        'chat_id': chat_id,
+        'text': 'کراپ پایین عکس‌ها (حذف نوار سورس/سواپ اینستاگرام):',
+        'reply_markup': json.dumps(crop_keyboard),
+    })
+    register_slide(shortcode, '_crop', chat_id, crop_msg['message_id'], selected=False, username=username)
 
     confirm_keyboard = {'inline_keyboard': [[
-        {'text': '✅ تایید و ارسال', 'callback_data': f'cf:{shortcode}'},
+        {'text': '✅ تایید و انتخاب کانال', 'callback_data': f'cf:{shortcode}'},
         {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
     ]]}
     ctrl = tg_bot_call('sendMessage', {
@@ -442,13 +466,14 @@ def send_preview(files, shortcode, chat_id, username=''):
         'text': (
             f'کروسل ({total} اسلاید) — {shortcode}\n\n'
             'به‌صورت پیش‌فرض هیچ اسلایدی انتخاب نشده. '
-            'روی اسلایدهایی که می‌خوای ارسال بشه بزن تا ✅ بشن، بعد «تایید و ارسال» رو بزن.'
+            'روی اسلایدهایی که می‌خوای ارسال بشه بزن تا ✅ بشن، کراپ رو در صورت نیاز فعال کن، '
+            'بعد «تایید و انتخاب کانال» رو بزن.'
         ),
         'reply_markup': json.dumps(confirm_keyboard),
     })
     # پیام کنترلی هم به‌عنوان یه ردیف مخصوص ثبت می‌شه (slide_index="_control")
     # تا موقع پاک‌سازی نهایی، این پیام هم حذف بشه
-    register_slide(shortcode, '_control', chat_id, ctrl['message_id'], selected=False)
+    register_slide(shortcode, '_control', chat_id, ctrl['message_id'], selected=False, username=username)
 
 
 # ─────────────────────────────────────────
@@ -509,6 +534,8 @@ def main():
     parser.add_argument('--ig-session', default='', help='مسیر فایل سشن instaloader (اختیاری — نبود آن یعنی anonymous)')
     parser.add_argument('--slides', default='', help='شماره اسلایدهای انتخابی، مثلا 2,4 (فقط mode=send)')
     parser.add_argument('--mode', default='send', choices=['preview', 'send'])
+    parser.add_argument('--crop', default='false', help='true/false — فقط تو mode=send اعمال می‌شه، تصمیمش تو preview با دکمه گرفته می‌شه')
+    parser.add_argument('--username', default='', help='یوزرنیم پیج منبع (اگه از پایش خودکار اومده باشه) — برای ثبت تو register-slide')
     args = parser.parse_args()
 
     url = args.url.strip()
@@ -522,7 +549,7 @@ def main():
 
         if args.mode == 'preview':
             print(f'📨 ارسال پیش‌نمایش با دکمه به chat_id={chat_id} (از طریق بات)...')
-            send_preview(files, shortcode, chat_id)
+            send_preview(files, shortcode, chat_id, username=args.username.strip())
             print('✅ پیش‌نمایش ارسال شد.')
             return
 
@@ -544,9 +571,10 @@ def main():
         else:
             selected_indices = list(range(1, len(files) + 1))
 
-        caption = build_caption_instagram(source_username, original_caption)
+        caption = build_caption_instagram(source_username, original_caption, channel_id=chat_id)
+        do_crop = args.crop.strip().lower() in ('true', '1', 'yes', 'on')
         items = [
-            {'filepath': f, 'caption': caption}
+            {'filepath': crop_bottom(f) if do_crop else f, 'caption': caption}
             for idx, f in enumerate(files, start=1)
             if idx in selected_indices
         ]
