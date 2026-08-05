@@ -303,6 +303,26 @@ def build_instaloader_instance(ig_session_path: str):
 
 
 # ─────────────────────────────────────────
+# تبدیل webp → jpg
+# اینستاگرام این روزها عکس‌ها رو با فرمت webp سرو می‌کنه، ولی sendPhoto
+# تلگرام (Bot API و Telethon) فایل‌های webp رو به‌عنوان استیکر/فایل می‌گیره
+# نه عکس واقعی — پس قبل از هر استفاده‌ای باید تبدیل بشن.
+# ─────────────────────────────────────────
+def convert_webp_to_jpg(webp_path: str) -> str:
+    jpg_path = os.path.splitext(webp_path)[0] + '.jpg'
+    try:
+        with Image.open(webp_path) as img:
+            if img.mode in ('RGBA', 'P', 'LA'):
+                img = img.convert('RGB')
+            img.save(jpg_path, 'JPEG', quality=95)
+        os.remove(webp_path)
+        return jpg_path
+    except Exception as e:
+        print(f'⚠️ تبدیل webp→jpg شکست خورد ({webp_path}): {e}')
+        return webp_path
+
+
+# ─────────────────────────────────────────
 # کراپ کردن پایین عکس (نوار سورس/swipe اینستاگرام معمولاً همونجاست)
 # ─────────────────────────────────────────
 def crop_bottom(filepath: str, percent: float = CROP_BOTTOM_PERCENT) -> str:
@@ -346,11 +366,18 @@ def download_instagram(url: str, ig_session_path: str):
         print(f'❌ download_post شکست خورد با این خطا: {type(e).__name__}: {e}')
         sys.exit(1)
 
-    files = sorted(f for f in glob.glob(os.path.join(WORKDIR, '**', '*'), recursive=True)
-                    if os.path.isfile(f) and f.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4')))
-    if not files:
+    raw_files = sorted(f for f in glob.glob(os.path.join(WORKDIR, '**', '*'), recursive=True)
+                        if os.path.isfile(f) and f.lower().endswith(
+                            ('.jpg', '.jpeg', '.png', '.mp4', '.webp')))
+    if not raw_files:
         print(f'❌ هیچ فایلی دانلود نشد (محتویات {WORKDIR}: {os.listdir(WORKDIR)})')
         sys.exit(1)
+
+    # هر webp رو همینجا (قبل از اینکه دست بقیه‌ی کد بهش برسه) به jpg تبدیل می‌کنیم
+    files = [
+        convert_webp_to_jpg(f) if f.lower().endswith('.webp') else f
+        for f in raw_files
+    ]
 
     # نکته: اینجا دیگه کراپ نمی‌شه! کراپ حالا یه تصمیمِ دستیه که کاربر موقع
     # preview با دکمه‌ی toggle مشخص می‌کنه (نه یه درصد ثابت روی همه‌چیز).
