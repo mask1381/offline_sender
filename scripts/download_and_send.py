@@ -340,12 +340,16 @@ def download_instagram(url: str, ig_session_path: str):
     except Exception:
         original_caption = ''
 
-    L.download_post(post, target=WORKDIR)
+    try:
+        L.download_post(post, target=WORKDIR)
+    except Exception as e:
+        print(f'❌ download_post شکست خورد با این خطا: {type(e).__name__}: {e}')
+        sys.exit(1)
 
-    files = sorted(f for f in glob.glob(os.path.join(WORKDIR, '*'))
+    files = sorted(f for f in glob.glob(os.path.join(WORKDIR, '**', '*'), recursive=True)
                     if os.path.isfile(f) and f.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4')))
     if not files:
-        print('❌ هیچ فایلی دانلود نشد')
+        print(f'❌ هیچ فایلی دانلود نشد (محتویات {WORKDIR}: {os.listdir(WORKDIR)})')
         sys.exit(1)
 
     # نکته: اینجا دیگه کراپ نمی‌شه! کراپ حالا یه تصمیمِ دستیه که کاربر موقع
