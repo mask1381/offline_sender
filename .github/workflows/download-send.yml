@@ -21,6 +21,16 @@ on:
         required: false
         type: string
         default: 'send'
+      crop:
+        description: 'true/false — فقط تو mode=send اعمال می‌شه؛ تصمیمش با دکمه‌ی کراپ تو preview گرفته شده'
+        required: false
+        type: string
+        default: 'false'
+      username:
+        description: 'یوزرنیم پیج منبع، فقط اگه از پایش خودکار اومده (برای ثبت تو register-slide)'
+        required: false
+        type: string
+        default: ''
       attempt:
         description: 'شماره‌ی تلاش فعلی (خودکار پر می‌شه، دستی نزن)'
         required: false
@@ -77,7 +87,9 @@ jobs:
             --chat-id "${{ inputs.chat_id }}" \
             ${{ env.IG_SESSION_ARG }} \
             --slides "${{ inputs.slides }}" \
-            --mode "${{ inputs.mode }}"
+            --mode "${{ inputs.mode }}" \
+            --crop "${{ inputs.crop }}" \
+            --username "${{ inputs.username }}"
 
       # اگه مرحله‌ی بالا fail بشه ولی هنوز به سقف تلاش نرسیده باشیم،
       # بعد از یه مکث کوتاه، خودمون رو دوباره با یه runner/IP تازه صدا می‌زنیم.
@@ -98,7 +110,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/download-send.yml/dispatches" \
-            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"slides\":\"${{ inputs.slides }}\",\"mode\":\"${{ inputs.mode }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
+            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"slides\":\"${{ inputs.slides }}\",\"mode\":\"${{ inputs.mode }}\",\"crop\":\"${{ inputs.crop }}\",\"username\":\"${{ inputs.username }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
           echo "HTTP status: $HTTP_CODE"
           cat response.json
           if [ "$HTTP_CODE" -ge 300 ]; then
