@@ -9,7 +9,12 @@
               وبهوک REGISTER_SLIDE_WEBHOOK_URL) ثبت می‌کنه -> یعنی پیش‌فرض «همه انتخابن»
               و کاربر با تیک زدن، اسلاید غیرلازم رو از حالت انتخاب خارج می‌کنه.
   - send    : فقط اسلایدهای انتخابی (--slides) رو با کپشن واقعیِ خودِ پست (فرمت‌شده)
-              به‌صورت آلبوم (media group) به کانال اصلی می‌فرسته.
+              به‌صورت آلبوم (media group) به --chat-id می‌فرسته.
+
+نکته‌ی مهم: --chat-id مقصد واقعیِ ارسال تلگرامه (همیشه چت خودِ کاربر/بات، نه
+کانال). --caption-channel-id فقط تعیین می‌کنه از کدوم قالب کپشن (هدر/فوتر
+مخصوص هر کانال) استفاده بشه - هیچ تاثیری روی مقصد پیام نداره. اگه ست نشه،
+به همون chat-id فال‌بک می‌کنه (رفتار قدیمی).
 
 نکته‌ی مهم درباره‌ی --slides خالی: دیگه به‌معنی «همه» نیست! اگه خالی برسه یعنی
 هیچ اسلایدی برای ارسال انتخاب نشده -> اسکریپت خطا می‌ده و از ارسال ناخواسته‌ی
@@ -142,6 +147,10 @@ def clean_original_caption(caption: str) -> str:
 # مربوط به همون کانال) رو می‌سازه. فقط بدنه (کپشن پاک‌شده‌ی خودِ پست)
 # بین همه مشترکه چون این تنها متادیتایی‌ه که از اینستاگرام در می‌آد؛
 # اسکریپت به generalTags/character (که فقط تو منبع بوروسورس هست) دسترسی نداره.
+#
+# نکته: این فرمت‌ها الان فقط بر اساس caption_channel_id انتخاب می‌شن که
+# صرفاً یه «سبک نمایشی» ـه (دکمه‌ای که کاربر تو تلگرام زده) و ربطی به
+# اینکه پیام واقعاً کجا فرستاده می‌شه نداره (مقصد واقعی همیشه chat_id است).
 # ─────────────────────────────────────────
 
 def _budget_for_body(header: str, footer: str) -> int:
@@ -169,6 +178,7 @@ def _caption_gww(cleaned_caption: str) -> str:
 
 def _caption_gws(cleaned_caption: str) -> str:
     # کانال اخبار/لیک گنشین — ادرس کانال: -1002718837879
+    header = ''
     footer = f'#leak\n🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
     return header + _quoted_body(cleaned_caption, header, footer) + footer
 
@@ -194,7 +204,7 @@ def _caption_gwa(cleaned_caption: str) -> str:
     return header + _quoted_body(cleaned_caption, header, footer) + footer
 
 
-# دیسپچ بر اساس chat_id انتخابی موقع تایید — هر کانال تابع خودش رو داره
+# دیسپچ بر اساس caption_channel_id انتخابی موقع تایید — هر کانال تابع خودش رو داره
 CHANNEL_CAPTION_BUILDERS = {
     '-1004312050043': _caption_gww,
     '182267768': _caption_gws,
@@ -205,15 +215,13 @@ CHANNEL_CAPTION_BUILDERS = {
 DEFAULT_CAPTION_BUILDER = _caption_gws
 
 
-def build_caption_instagram(source_username: str, original_caption: str = '', channel_id: str = '') -> str:
-    builder = CHANNEL_CAPTION_BUILDERS.get(str(channel_id).strip(), DEFAULT_CAPTION_BUILDER)
+def build_caption_instagram(source_username: str, original_caption: str = '', caption_channel_id: str = '') -> str:
+    builder = CHANNEL_CAPTION_BUILDERS.get(str(caption_channel_id).strip(), DEFAULT_CAPTION_BUILDER)
     cleaned_caption = clean_original_caption((original_caption or '').strip())
     return builder(cleaned_caption)
 
 
-
-
-# ────────────────────────────���────────────
+# ─────────────────────────────────────────
 # جایگزینی requests.Session داخلی instaloader با یه session از curl_cffi
 # که رفتار TLS/HTTP2 مرورگر واقعی رو جعل می‌کنه (fingerprint spoofing)
 # + وصل کردن پراکسی رزیدنشیال (اگه تنظیم شده باشه)
@@ -601,7 +609,11 @@ async def send_items_to_telegram(items, chat_id):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--url', required=True)
-    parser.add_argument('--chat-id', required=True)
+    parser.add_argument('--chat-id', required=True,
+                         help='مقصد واقعی ارسال تلگرام (همیشه چت خودت/بات، هرگز کانال)')
+    parser.add_argument('--caption-channel-id', default='',
+                         help='فقط برای انتخاب فرمت/قالب کپشن استفاده می‌شه (کانالی که با دکمه انتخاب کردی) — '
+                              'مقصد ارسال رو تغییر نمی‌ده. اگه خالی باشه، از --chat-id فال‌بک می‌کنه.')
     parser.add_argument('--ig-session', default='', help='مسیر فایل سشن instaloader (اختیاری — نبود آن یعنی anonymous)')
     parser.add_argument('--slides', default='', help='شماره اسلایدهای انتخابی، مثلا 2,4 (فقط mode=send)')
     parser.add_argument('--mode', default='send', choices=['preview', 'send'])
@@ -611,6 +623,7 @@ def main():
 
     url = args.url.strip()
     chat_id = args.chat_id.strip()
+    caption_channel_id = args.caption_channel_id.strip() or chat_id
 
     print(f'🌐 حالت: {args.mode}')
 
@@ -642,7 +655,7 @@ def main():
         else:
             selected_indices = list(range(1, len(files) + 1))
 
-        caption = build_caption_instagram(source_username, original_caption, channel_id=chat_id)
+        caption = build_caption_instagram(source_username, original_caption, caption_channel_id=caption_channel_id)
         do_crop = args.crop.strip().lower() in ('true', '1', 'yes', 'on')
         items = [
             {'filepath': crop_bottom(f) if do_crop else f, 'caption': caption}
@@ -657,7 +670,7 @@ def main():
             size_mb = os.path.getsize(item['filepath']) / 1024 / 1024
             print(f"✅ آماده ارسال: {item['filepath']} ({size_mb:.1f} MB)")
 
-        print(f'📨 در حال ارسال نهایی به تلگرام (chat_id={chat_id}, تعداد آیتم={len(items)})...')
+        print(f'📨 در حال ارسال نهایی به تلگرام (chat_id={chat_id}, caption_channel_id={caption_channel_id}, تعداد آیتم={len(items)})...')
         try:
             sent = asyncio.run(send_items_to_telegram(items, chat_id))
             ids = ', '.join(str(s.id) for s in sent)
