@@ -136,43 +136,82 @@ def clean_original_caption(caption: str) -> str:
     return "\n\n".join(cleaned_blocks).strip()
 
 
-# برند/فوتر هر یک از ۵ کانال مقصد — بر اساس chat_id انتخابی موقع تایید
-CHANNEL_BRANDING = {
-    '-1004312050043': ('#wallpaper', 'https://t.me/genshinworldwallpaper', 'GWW | Teyvat Archive'),
-    '-1002718837879': ('#leak', 'https://t.me/genshinworldsensei', 'GWS | Teyvat Archive'),
-    '-1004325251576': ('#anime', 'https://t.me/animeworldwallpape', 'AWW | Wallpapers Archive'),
-    '-1004401084373': ('#waifu', 'https://t.me/waifupi', 'WWA | Waifu World Art'),
-    '-1003922226618': ('#fanart', 'https://t.me/genshinworldart', 'GWA | Teyvat Archive'),
+# ─────────────────────────────────────────
+# فرمت کپشن هر کانال کاملاً جداست — هیچ‌کدوم فرمت مشترک ندارن.
+# هر تابع دقیقاً هدر/جداکننده/فوتر همون کانال (بر اساس نودهای n8n
+# مربوط به همون کانال) رو می‌سازه. فقط بدنه (کپشن پاک‌شده‌ی خودِ پست)
+# بین همه مشترکه چون این تنها متادیتایی‌ه که از اینستاگرام در می‌آد؛
+# اسکریپت به generalTags/character (که فقط تو منبع بوروسورس هست) دسترسی نداره.
+# ─────────────────────────────────────────
+
+def _budget_for_body(header: str, footer: str) -> int:
+    footer_stub = f'\n\n{footer}'
+    budget = MAX_TG_CAPTION_LEN - len(header) - len(footer_stub) - len('<blockquote></blockquote>') - 10
+    return budget if budget >= 20 else 20
+
+
+def _quoted_body(cleaned_caption: str, header: str, footer: str) -> str:
+    if not (cleaned_caption and _caption_has_meaningful_text(cleaned_caption)):
+        return ''
+    budget = _budget_for_body(header, footer)
+    oc = cleaned_caption
+    if len(oc) > budget:
+        oc = oc[:budget].rstrip() + '…'
+    return f'<blockquote>{oc}</blockquote>\n\n'
+
+
+def _caption_gww(cleaned_caption: str) -> str:
+    # کانال والپیپر گنشین — ادرس کانال: -1004312050043
+    header = f"◈╌╌ {bi('Wallpaper')} ╌╌◈\n\n"
+    footer = f'◈╌╌ <a href="https://t.me/genshinworldwallpaper">{bi("GWW")} · {bi("Teyvat Archive")}</a> ╌╌◈'
+    return header + _quoted_body(cleaned_caption, header, footer) + footer
+
+
+def _caption_gws(cleaned_caption: str) -> str:
+    # کانال اخبار/لیک گنشین — ادرس کانال: -1002718837879
+    header = f"⚡️ <b>{bi('LEAK')}</b>\n\n"
+    footer = f'#leak\n🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
+    return header + _quoted_body(cleaned_caption, header, footer) + footer
+
+
+def _caption_aww(cleaned_caption: str) -> str:
+    # کانال والپیپر انیمه — ادرس کانال: -1004325251576
+    header = f"•.❀· {bi('AWW')} ·❀.•\n\n"
+    footer = f'⟡ <a href="https://t.me/animeworldwallpape">{bi("AWW | Wallpapers Archive")}</a>'
+    return header + _quoted_body(cleaned_caption, header, footer) + footer
+
+
+def _caption_wwa(cleaned_caption: str) -> str:
+    # کانال وایفو — ادرس کانال: -1004401084373
+    header = f"⋆｡𖦹°‧ <b>{bi('waifu Fanart')}</b> ‧°𖦹｡⋆\n\n"
+    footer = f'⟡ <a href="https://t.me/waifupi">{bi("WWA | Waifu World Art")}</a>'
+    return header + _quoted_body(cleaned_caption, header, footer) + footer
+
+
+def _caption_gwa(cleaned_caption: str) -> str:
+    # کانال ارت گنشین — ادرس کانال: -1003922226618
+    header = f"⋆｡𖦹°‧ <b>{bi('Genshin Fanart')}</b> ‧°𖦹｡⋆\n\n"
+    footer = f'⟡ <a href="https://t.me/genshinworldart">{bi("GWA | Teyvat Archive")}</a>'
+    return header + _quoted_body(cleaned_caption, header, footer) + footer
+
+
+# دیسپچ بر اساس chat_id انتخابی موقع تایید — هر کانال تابع خودش رو داره
+CHANNEL_CAPTION_BUILDERS = {
+    '-1004312050043': _caption_gww,
+    '-1002718837879': _caption_gws,
+    '-1004325251576': _caption_aww,
+    '-1004401084373': _caption_wwa,
+    '-1003922226618': _caption_gwa,
 }
-DEFAULT_BRANDING = ('#leak', 'https://t.me/genshinworldsensei', 'GWS | Teyvat Archive')
+DEFAULT_CAPTION_BUILDER = _caption_gws
 
 
 def build_caption_instagram(source_username: str, original_caption: str = '', channel_id: str = '') -> str:
-    hashtag, link, link_label = CHANNEL_BRANDING.get(str(channel_id).strip(), DEFAULT_BRANDING)
-    header = f"⚡️ <b>{bi('TEYVAT LEAK')}</b>\n\n"
+    builder = CHANNEL_CAPTION_BUILDERS.get(str(channel_id).strip(), DEFAULT_CAPTION_BUILDER)
+    cleaned_caption = clean_original_caption((original_caption or '').strip())
+    return builder(cleaned_caption)
 
-    original_caption = (original_caption or '').strip()
 
-    body = ''
-    # Clean the original caption from boilerplate blocks before deciding
-    cleaned_caption = clean_original_caption(original_caption)
-
-    # اگر کپشن معنادار باشه، داخل blockquote قرار می‌دیم
-    footer = f'{hashtag}\n🌸 <a href="{link}">{link_label}</a>'
-
-    if cleaned_caption and _caption_has_meaningful_text(cleaned_caption):
-        # محاسبه بودجه باقیمانده برای جلوگیری از overflow
-        footer_stub = f'\n\n{footer}'
-        budget = MAX_TG_CAPTION_LEN - len(header) - len(footer_stub) - len('<blockquote></blockquote>') - 10
-        if budget < 20:
-            budget = 20
-        oc = cleaned_caption
-        if len(oc) > budget:
-            oc = oc[:budget].rstrip() + '…'
-        body = f'<blockquote>{oc}</blockquote>\n\n'
-
-    # ساختار نهایی: header + optional body + هشتگ/فوتر مخصوص همین کانال
-    return header + body + footer
 
 
 # ────────────────────────────���────────────
