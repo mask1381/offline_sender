@@ -177,10 +177,57 @@ def _caption_gww(cleaned_caption: str) -> str:
 
 
 def _caption_gws(cleaned_caption: str) -> str:
-    # کانال اخبار/لیک گنشین — ادرس کانال: -1002718837879
-    header = ''
-    footer = f'#leak\n🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
-    return header + _quoted_body(cleaned_caption, header, footer) + footer
+    """
+    کانال اخبار/لیک گنشین — ادرس کانال: -1002718837879
+
+    عیناً منطق نود n8n «caption» (برای ویدیوهای یوتیوب) پیاده‌سازی شده:
+    تشخیص نوع محتوا (Soundscape > Teaser > Moment > Chronicle)، استخراج
+    هشتگ از خودِ تیتر، پاکسازی تیتر، و فرمت ثابت GWS.
+
+    نکته: is_audio_only تو JS از یه فیلد جدا (infoData.is_audio_only) میاد
+    که تو این اسکریپت (منبع اینستاگرام) وجود نداره — پس همیشه False
+    در نظر گرفته می‌شه، مگر این‌که بعداً این سیگنال از جای دیگه‌ای تامین بشه.
+    """
+    title = cleaned_caption or ''
+    is_audio_only = False  # این اسکریپت سیگنال جدای audio-only نداره
+
+    # ---------- تشخیص نوع محتوا: آلبوم/OST > تریلر > شورت > عادی ----------
+    is_short = bool(re.search(r'#shorts?\b', title, re.IGNORECASE))
+    is_trailer = bool(re.search(r'trailer|teaser|\bpv\b', title, re.IGNORECASE))
+
+    if is_audio_only:
+        type_, emoji = 'TEYVAT SOUNDSCAPE', '🎵'
+    elif is_trailer:
+        type_, emoji = 'TEYVAT TEASER', '🎥'
+    elif is_short:
+        type_, emoji = 'TEYVAT MOMENT', '📱'
+    else:
+        type_, emoji = 'TEYVAT CHRONICLE', '🎬'
+
+    # ---------- استخراج هشتگ‌ها از تیتر ----------
+    hashtags = re.findall(r'#[^\W\d_]|#[\w]+', title, re.UNICODE)
+    # معادل دقیق‌تر \p{L}\p{N}_ در JS:
+    hashtags = re.findall(r'#[^\s#!\"$%&\'()*+,\-./:;<=>?@\[\]^`{|}~]+', title, re.UNICODE)
+    filtered_hashtags = [h for h in hashtags if not re.match(r'^#shorts?$', h, re.IGNORECASE)]
+    hashtag_line = ' '.join(filtered_hashtags)
+
+    # ---------- پاکسازی تیتر (برای کپشن) ----------
+    cleaned_title = re.sub(r'#[^\s#!\"$%&\'()*+,\-./:;<=>?@\[\]^`{|}~]+', '', title, flags=re.UNICODE)
+    cleaned_title = re.sub(r'\s{2,}', ' ', cleaned_title)
+    cleaned_title = re.sub(r'\|\s*$', '', cleaned_title).strip()
+
+    # ---------- ساخت کپشن ----------
+    caption = f'{emoji} <b>{bi(type_)}</b>\n\n'
+    caption += f'<blockquote><b>{bi(cleaned_title)}</b></blockquote>\n\n'
+
+    if is_audio_only:
+        caption += f'{bi("🎧 Audio Release")}\n\n'
+
+    if hashtag_line:
+        caption += f'{hashtag_line}\n\n'
+
+    caption += f'🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
+    return caption
 
 
 def _caption_aww(cleaned_caption: str) -> str:
