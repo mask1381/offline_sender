@@ -445,16 +445,15 @@ def send_preview(files, shortcode, chat_id, username=''):
     """
     total = len(files)
 
-    def send_media(filepath, caption, keyboard):
+    def send_media(filepath, caption, keyboard=None):
         is_video = filepath.lower().endswith('.mp4')
         method = 'sendVideo' if is_video else 'sendPhoto'
         field = 'video' if is_video else 'photo'
+        data = {'chat_id': chat_id, 'caption': caption}
+        if keyboard is not None:
+            data['reply_markup'] = json.dumps(keyboard)
         with open(filepath, 'rb') as f:
-            result = tg_bot_call(method, {
-                'chat_id': chat_id,
-                'caption': caption,
-                'reply_markup': json.dumps(keyboard),
-            }, files={field: f})
+            result = tg_bot_call(method, data, files={field: f})
         return result['message_id']
 
     if total == 1:
@@ -468,30 +467,28 @@ def send_preview(files, shortcode, chat_id, username=''):
         register_slide(shortcode, 1, chat_id, mid, selected=True, username=username)
         return
 
+    # نکته‌ی مهم: عکس‌ها بدون هیچ دکمه‌ای فرستاده می‌شن. همه‌ی دکمه‌ها
+    # (تیک هر اسلاید + کراپ + تایید/رد) فقط زیر یه پیام آخر (کنترلی)
+    # میان. دلیلش اینه که n8n موقع toggle، کیبورد کامل رو رو همون
+    # message_id-ای که ثبت شده ادیت می‌کنه؛ اگه هر اسلاید message_id
+    # جدا داشته باشه، بعد از اولین تپ کل کیبورد زیر همون عکس ظاهر
+    # می‌شه (باگ). با ثبت همه‌ی ردیف‌ها روی یه message_id مشترک،
+    # هر تپ همیشه همون یه پیام رو ادیت می‌کنه و بقیه‌ی عکس‌ها تمیز می‌مونن.
     for idx, filepath in enumerate(files, start=1):
-        keyboard = {'inline_keyboard': [[
-            {'text': f'☐ اسلاید {idx}', 'callback_data': f'tg:{shortcode}:{idx}'}
-        ]]}
-        mid = send_media(filepath, f'اسلاید {idx}/{total} — {shortcode}', keyboard)
-        # opt-in: پیش‌فرض انتخاب نشده؛ کاربر با تپ کردن آن را انتخاب می‌کند
-        register_slide(shortcode, idx, chat_id, mid, selected=False, username=username)
+        send_media(filepath, f'اسلاید {idx}/{total} — {shortcode}')
 
-    # دکمه‌ی جدا برای toggle کراپ (پیش‌فرض خاموش) — با همون الگوی toggle که
-    # n8n برای اسلایدها می‌شناسه، فقط با پیشوند cp: و slide_index="_crop"
-    crop_keyboard = {'inline_keyboard': [[
-        {'text': '☐ کراپ غیرفعال', 'callback_data': f'cp:{shortcode}'}
-    ]]}
-    crop_msg = tg_bot_call('sendMessage', {
-        'chat_id': chat_id,
-        'text': 'کراپ پایین عکس‌ها (حذف نوار سورس/سواپ اینستاگرام):',
-        'reply_markup': json.dumps(crop_keyboard),
-    })
-    register_slide(shortcode, '_crop', chat_id, crop_msg['message_id'], selected=False, username=username)
+    slide_buttons = [[{
+        'text': f'☐ اسلاید {idx}',
+        'callback_data': f'tg:{shortcode}:{idx}',
+    }] for idx in range(1, total + 1)]
 
-    confirm_keyboard = {'inline_keyboard': [[
-        {'text': '✅ تایید و انتخاب کانال', 'callback_data': f'cf:{shortcode}'},
-        {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
-    ]]}
+    control_keyboard = {'inline_keyboard': slide_buttons + [
+        [{'text': '☐ کراپ غیرفعال', 'callback_data': f'cp:{shortcode}'}],
+        [
+            {'text': '✅ تایید و انتخاب کانال', 'callback_data': f'cf:{shortcode}'},
+            {'text': '❌ رد', 'callback_data': f'rj:{shortcode}'},
+        ],
+    ]}
     ctrl = tg_bot_call('sendMessage', {
         'chat_id': chat_id,
         'text': (
@@ -500,11 +497,16 @@ def send_preview(files, shortcode, chat_id, username=''):
             'روی اسلایدهایی که می‌خوای ارسال بشه بزن تا ✅ بشن، کراپ رو در صورت نیاز فعال کن، '
             'بعد «تایید و انتخاب کانال» رو بزن.'
         ),
-        'reply_markup': json.dumps(confirm_keyboard),
+        'reply_markup': json.dumps(control_keyboard),
     })
-    # پیام کنترلی هم به‌عنوان یه ردیف مخصوص ثبت می‌شه (slide_index="_control")
-    # تا موقع پاک‌سازی نهایی، این پیام هم حذف بشه
-    register_slide(shortcode, '_control', chat_id, ctrl['message_id'], selected=False, username=username)
+    ctrl_mid = ctrl['message_id']
+
+    # همه‌ی ردیف‌ها (اسلایدها، کراپ، کنترل) روی همون یه message_id ثبت
+    # می‌شن تا n8n همیشه فقط همین یه پیام رو ادیت کنه.
+    for idx in range(1, total + 1):
+        register_slide(shortcode, idx, chat_id, ctrl_mid, selected=False, username=username)
+    register_slide(shortcode, '_crop', chat_id, ctrl_mid, selected=False, username=username)
+    register_slide(shortcode, '_control', chat_id, ctrl_mid, selected=False, username=username)
 
 
 # ─────────────────────────────────────────
