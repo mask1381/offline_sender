@@ -169,7 +169,6 @@ def _caption_gww(cleaned_caption: str) -> str:
 
 def _caption_gws(cleaned_caption: str) -> str:
     # کانال اخبار/لیک گنشین — ادرس کانال: -1002718837879
-    header = f"⚡️ <b>{bi('LEAK')}</b>\n\n"
     footer = f'#leak\n🌸 <a href="https://t.me/genshinworldsensei">{bi("GWS | Teyvat Archive")}</a>'
     return header + _quoted_body(cleaned_caption, header, footer) + footer
 
@@ -177,14 +176,14 @@ def _caption_gws(cleaned_caption: str) -> str:
 def _caption_aww(cleaned_caption: str) -> str:
     # کانال والپیپر انیمه — ادرس کانال: -1004325251576
     header = f"•.❀· {bi('AWW')} ·❀.•\n\n"
-    footer = f'⟡ <a href="https://t.me/animeworldwallpape">{bi("AWW | Wallpapers Archive")}</a>'
+    footer = f'⟡ <a href="https://t.me/animeworldwallpape">{bi("AWW | Wallpapers Lab")}</a>'
     return header + _quoted_body(cleaned_caption, header, footer) + footer
 
 
 def _caption_wwa(cleaned_caption: str) -> str:
     # کانال وایفو — ادرس کانال: -1004401084373
     header = f"⋆｡𖦹°‧ <b>{bi('waifu Fanart')}</b> ‧°𖦹｡⋆\n\n"
-    footer = f'⟡ <a href="https://t.me/waifupi">{bi("WWA | Waifu World Art")}</a>'
+    footer = f'⟡ <a href="https://t.me/waifupi">{bi("WWA | Waifu Lab")}</a>'
     return header + _quoted_body(cleaned_caption, header, footer) + footer
 
 
