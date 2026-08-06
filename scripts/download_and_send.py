@@ -198,7 +198,7 @@ def _caption_gwa(cleaned_caption: str) -> str:
 # دیسپچ بر اساس chat_id انتخابی موقع تایید — هر کانال تابع خودش رو داره
 CHANNEL_CAPTION_BUILDERS = {
     '-1004312050043': _caption_gww,
-    '-1002718837879': _caption_gws,
+    '182267768': _caption_gws,
     '-1004325251576': _caption_aww,
     '-1004401084373': _caption_wwa,
     '-1003922226618': _caption_gwa,
