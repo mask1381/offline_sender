@@ -8,16 +8,21 @@ on:
         required: true
         type: string
       chat_id:
-        description: 'chat_id مقصد در تلگرام'
+        description: 'chat_id مقصد واقعی در تلگرام (حالا همیشه چت خودت/بات)'
         required: true
         type: string
+      caption_channel_id:
+        description: 'فقط برای انتخاب فرمت کپشن استفاده می‌شه (کانالی که با دکمه انتخاب کردی) - مقصد ارسال رو تغییر نمی‌ده'
+        required: false
+        type: string
+        default: ''
       slides:
         description: 'شماره اسلایدهای انتخابی برای پست کروسل (مثلا 2,4) - خالی بذار یعنی همه'
         required: false
         type: string
         default: ''
       mode:
-        description: 'preview = فرستادن همه اسلایدها برای تایید | send = ارسال نهایی اسلایدهای انتخابی به کانال'
+        description: 'preview = فرستادن همه اسلایدها برای تایید | send = ارسال نهایی اسلایدهای انتخابی'
         required: false
         type: string
         default: 'send'
@@ -85,6 +90,7 @@ jobs:
           python scripts/download_and_send.py \
             --url "${{ inputs.url }}" \
             --chat-id "${{ inputs.chat_id }}" \
+            --caption-channel-id "${{ inputs.caption_channel_id }}" \
             ${{ env.IG_SESSION_ARG }} \
             --slides "${{ inputs.slides }}" \
             --mode "${{ inputs.mode }}" \
@@ -110,7 +116,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/download-send.yml/dispatches" \
-            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"slides\":\"${{ inputs.slides }}\",\"mode\":\"${{ inputs.mode }}\",\"crop\":\"${{ inputs.crop }}\",\"username\":\"${{ inputs.username }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
+            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"caption_channel_id\":\"${{ inputs.caption_channel_id }}\",\"slides\":\"${{ inputs.slides }}\",\"mode\":\"${{ inputs.mode }}\",\"crop\":\"${{ inputs.crop }}\",\"username\":\"${{ inputs.username }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
           echo "HTTP status: $HTTP_CODE"
           cat response.json
           if [ "$HTTP_CODE" -ge 300 ]; then
