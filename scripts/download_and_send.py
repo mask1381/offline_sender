@@ -239,7 +239,8 @@ def _caption_aww(cleaned_caption: str) -> str:
 
 def _caption_wwa(cleaned_caption: str) -> str:
     # کانال وایفو — ادرس کانال: -1004401084373
-    footer = f'⟡ <a href="https://t.me/waifu_lab">{bi("WWA | Waifu Lab")}</a>'
+  header = f""  
+  footer = f'⟡ <a href="https://t.me/waifu_lab">{bi("WWA | Waifu Lab")}</a>'
     return header + _quoted_body(cleaned_caption, header, footer) + footer
 
 
