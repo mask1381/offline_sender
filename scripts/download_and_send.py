@@ -240,7 +240,11 @@ def _caption_aww(cleaned_caption: str) -> str:
 def _caption_wwa(cleaned_caption: str) -> str:
     # کانال وایفو — ادرس کانال: -1004401084373
     footer = f'⟡ <a href="https://t.me/waifu_lab">{bi("WWA | Waifu Lab")}</a>'
-    return _quoted_body(cleaned_caption, header, footer) + footer
+    
+    # اگر caption معنی‌دار است
+    if cleaned_caption and _caption_has_meaningful_text(cleaned_caption):
+        return f'<blockquote>{cleaned_caption}</blockquote>\n\n' + footer
+    return footer
 
 
 def _caption_gwa(cleaned_caption: str) -> str:
