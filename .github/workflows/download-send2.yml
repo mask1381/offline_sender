@@ -42,16 +42,28 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Setup Instagram session (optional)
+        run: |
+          if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
+            echo "ℹ️ secret INSTAGRAM_SESSION_B64 تنظیم نشده — اجرا به‌صورت anonymous (بدون لاگین) ادامه پیدا می‌کنه."
+            echo "IG_SESSION_ARG=" >> "$GITHUB_ENV"
+          else
+            echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
+            echo "IG_SESSION_ARG=--ig-session ig_session.bin" >> "$GITHUB_ENV"
+          fi
+
       - name: Run download & send script
         id: download
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
         run: |
           python scripts/download_and_send2.py \
             --url "${{ inputs.url }}" \
-            --chat-id "${{ inputs.chat_id }}"
+            --chat-id "${{ inputs.chat_id }}" \
+            ${{ env.IG_SESSION_ARG }}
 
       # اگه مرحله‌ی بالا fail بشه ولی هنوز به سقف تلاش نرسیده باشیم،
       # بعد از یه مکث کوتاه، خودمون رو دوباره با یه runner/IP تازه صدا می‌زنیم.
