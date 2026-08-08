@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 jobs:
-  download-and-send:
+  download-and-send2:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
