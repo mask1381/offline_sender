@@ -3,17 +3,27 @@ name: Download and Send to Telegram (Instagram)
 on:
   workflow_dispatch:
     inputs:
+      media_json:
+        description: >-
+          (روش اصلی) JSON آرایه‌ای از {"url":"...","type":"photo|video"} —
+          لینک‌های CDN مستقیم که Apify از خروجی اسکرپ استخراج کرده. با این
+          روش هیچ لاگین/instaloader لازم نیست.
+        required: false
+        type: string
+      caption:
+        description: 'کپشن اصلی پست (از خروجی Apify — فقط وقتی media_json پر شده استفاده می‌شه)'
+        required: false
+        type: string
       url:
-        description: 'لینک پست اینستاگرام برای دانلود'
-        required: true
+        description: '[فقط ردیت، یا فال‌بک قدیمی اینستاگرام] لینک پست'
+        required: false
         type: string
       chat_id:
         description: 'chat_id مقصد در تلگرام'
         required: true
         type: string
-      
+
 permissions:
-  actions: write
   contents: read
 
 jobs:
@@ -32,10 +42,9 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Setup Instagram session (optional)
+      - name: Setup Instagram session (optional — فقط برای فال‌بک قدیمی instaloader)
         run: |
           if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
-            echo "ℹ️ secret INSTAGRAM_SESSION_B64 تنظیم نشده — اجرا به‌صورت anonymous (بدون لاگین) ادامه پیدا می‌کنه."
             echo "IG_SESSION_ARG=" >> "$GITHUB_ENV"
           else
             echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
@@ -51,6 +60,8 @@ jobs:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
         run: |
           python scripts/download_and_send2.py \
-            --url "${{ inputs.url }}" \
             --chat-id "${{ inputs.chat_id }}" \
+            --media-json "${{ inputs.media_json }}" \
+            --caption "${{ inputs.caption }}" \
+            --url "${{ inputs.url }}" \
             ${{ env.IG_SESSION_ARG }}
