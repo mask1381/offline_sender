@@ -58,10 +58,20 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          # نکته‌ی مهم: این‌ها رو از طریق env می‌فرستیم نه با جایگذاری مستقیم
+          # داخل رشته‌ی run — چون media_json/caption کوتیشن و newline دارن و
+          # جایگذاری مستقیم GitHub Actions باعث می‌شه bash رشته‌ی دستور رو
+          # زودتر از موعد ببنده (خطای "line N: --caption: command not found").
+          # با env، مقدار مستقیم و دست‌نخورده به‌عنوان یک متغیر ست می‌شه و
+          # bash دیگه مجبور به parse دوباره‌ی محتوای داخلش نیست.
+          INPUT_CHAT_ID: ${{ inputs.chat_id }}
+          INPUT_MEDIA_JSON: ${{ inputs.media_json }}
+          INPUT_CAPTION: ${{ inputs.caption }}
+          INPUT_URL: ${{ inputs.url }}
         run: |
           python scripts/download_and_send2.py \
-            --chat-id "${{ inputs.chat_id }}" \
-            --media-json "${{ inputs.media_json }}" \
-            --caption "${{ inputs.caption }}" \
-            --url "${{ inputs.url }}" \
+            --chat-id "$INPUT_CHAT_ID" \
+            --media-json "$INPUT_MEDIA_JSON" \
+            --caption "$INPUT_CAPTION" \
+            --url "$INPUT_URL" \
             ${{ env.IG_SESSION_ARG }}
