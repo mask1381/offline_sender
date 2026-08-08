@@ -1,0 +1,87 @@
+name: Download and Send to Telegram (Instagram)
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'لینک پست اینستاگرام برای دانلود'
+        required: true
+        type: string
+      chat_id:
+        description: 'chat_id مقصد در تلگرام'
+        required: true
+        type: string
+      attempt:
+        description: 'شماره‌ی تلاش فعلی (خودکار پر می‌شه، دستی نزن)'
+        required: false
+        type: string
+        default: '1'
+      max_attempts:
+        description: 'حداکثر تعداد تلاش قبل از تسلیم شدن'
+        required: false
+        type: string
+        default: '5'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  download-and-send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run download & send script
+        id: download
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+        run: |
+          python scripts/download_and_send.py \
+            --url "${{ inputs.url }}" \
+            --chat-id "${{ inputs.chat_id }}"
+
+      # اگه مرحله‌ی بالا fail بشه ولی هنوز به سقف تلاش نرسیده باشیم،
+      # بعد از یه مکث کوتاه، خودمون رو دوباره با یه runner/IP تازه صدا می‌زنیم.
+      - name: Retry on failure (new runner = new IP)
+        if: failure() && fromJSON(inputs.attempt) < fromJSON(inputs.max_attempts)
+        env:
+          GH_TOKEN: ${{ secrets.RETRY_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "🛑 secret به اسم RETRY_PAT تنظیم نشده — بدون اون، retry خودکار ممکن نیست."
+            exit 1
+          fi
+          NEXT_ATTEMPT=$(( ${{ inputs.attempt }} + 1 ))
+          echo "❌ تلاش شماره ${{ inputs.attempt }} شکست خورد. صبر می‌کنیم و با runner جدید تلاش ${NEXT_ATTEMPT} رو شروع می‌کنیم..."
+          sleep 120
+          HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/download-send.yml/dispatches" \
+            -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
+          echo "HTTP status: $HTTP_CODE"
+          cat response.json
+          if [ "$HTTP_CODE" -ge 300 ]; then
+            echo "🛑 دیسپچ retry شکست خورد (کد $HTTP_CODE) — متن بالا رو ببین."
+            exit 1
+          fi
+
+      - name: Give up after max attempts
+        if: failure() && fromJSON(inputs.attempt) >= fromJSON(inputs.max_attempts)
+        run: |
+          echo "🛑 بعد از ${{ inputs.max_attempts }} تلاش، دانلود این لینک موفق نشد: ${{ inputs.url }}"
+          exit 1
