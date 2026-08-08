@@ -20,6 +20,7 @@
 import argparse
 import asyncio
 import glob
+import json
 import os
 import re
 import shutil
@@ -145,6 +146,47 @@ def harden_instaloader_session(L):
 
     proxy_note = 'با پراکسی رزیدنشیال' if IG_PROXY_URL else 'بدون پراکسی'
     print(f'🛡️ session با curl_cffi (impersonate={CURL_CFFI_IMPERSONATE!r}, {proxy_note}) جایگزین شد')
+
+
+# ─────────────────────────────────────────
+# دانلود مستقیم از لینک‌های CDN که Apify از قبل استخراج کرده
+# (image_versions2 / video_versions / carousel_media)
+#
+# نیازی به instaloader، لاگین، یا هیچ درخواست اضافه‌ای به اینستاگرام نیست:
+# این لینک‌ها از قبل public و امضاشده‌ن (همون‌هایی که مرورگر خودت هم موقع
+# باز کردن پست می‌گیره) — فقط یه GET ساده کافیه.
+# ─────────────────────────────────────────
+def download_media_direct(media_items: list):
+    """
+    media_items: لیستی از دیکشنری‌های {"url": "...", "type": "photo"|"video"}
+    (دقیقاً چیزی که نود n8n از خروجی Apify استخراج و به‌عنوان media_json می‌فرسته)
+    """
+    session = build_hardened_cffi_session()
+    files = []
+
+    for idx, item in enumerate(media_items):
+        url = item.get('url', '').strip()
+        media_type = (item.get('type') or '').strip().lower()
+        if not url:
+            continue
+
+        ext = '.mp4' if media_type == 'video' else _guess_ext_from_url(url, default='.jpg')
+        dest = os.path.join(WORKDIR, f'ig_{idx}{ext}')
+        try:
+            _download_binary(session, url, dest)
+            files.append(dest)
+        except Exception as e:
+            print(f'⚠️ دانلود آیتم {idx} شکست خورد ({url[:80]}...): {e}')
+
+    if not files:
+        print('❌ هیچ فایلی دانلود نشد (media_json خالی بود یا همه‌ی لینک‌ها fail شدن)')
+        sys.exit(1)
+
+    files = [
+        convert_webp_to_jpg(f) if f.lower().endswith('.webp') else f
+        for f in files
+    ]
+    return files
 
 
 # ─────────────────────────────────────────
@@ -412,30 +454,54 @@ def detect_source(url: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--url', required=True)
+    parser.add_argument('--url', required=False, default='',
+                         help='لینک پست (فقط برای ردیت لازمه؛ برای اینستاگرام از --media-json استفاده کن)')
     parser.add_argument('--chat-id', required=True)
+    parser.add_argument('--media-json', required=False, default='',
+                         help='(روش اصلی اینستاگرام) JSON آرایه‌ای از '
+                              '{"url":"...","type":"photo|video"} که از خروجی Apify میاد — '
+                              'لینک‌های CDN از قبل public و امضاشده‌ن، نیازی به لاگین/instaloader نیست.')
+    parser.add_argument('--caption', required=False, default='',
+                         help='کپشن اصلی پست (وقتی از --media-json استفاده می‌شه، کپشن رو Apify داده و اینجا پاس داده می‌شه)')
     parser.add_argument('--source', required=False, default='',
                          help='instagram | reddit (اختیاری - اگه ندی از روی خود URL تشخیص داده می‌شه)')
-    parser.add_argument('--ig-session', default='', help='مسیر فایل سشن instaloader (اختیاری — نبود آن یعنی anonymous)')
+    parser.add_argument('--ig-session', default='',
+                         help='[فقط fallback قدیمی instaloader] مسیر فایل سشن — برای مسیر اصلی (--media-json) لازم نیست')
     args = parser.parse_args()
 
-    url = args.url.strip()
     chat_id = args.chat_id.strip()
-    source = args.source.strip().lower() or detect_source(url)
+    media_json = args.media_json.strip()
 
     if not (TG_API_ID and TG_API_HASH and TG_SESSION_STRING):
         print('❌ TG_API_ID / TG_API_HASH / TG_SESSION_STRING تنظیم نشده (باید GitHub Secrets باشن)')
         sys.exit(1)
 
-    if source not in ('instagram', 'reddit'):
-        print(f'❌ نوع لینک ناشناخته‌ست (source={source!r}, url={url!r})')
-        sys.exit(1)
-
     try:
-        if source == 'instagram':
-            files, original_caption = download_instagram(url, args.ig_session)
+        # ── مسیر اصلی: لینک‌های CDN مستقیم از Apify (بدون لاگین/instaloader) ──
+        if media_json:
+            try:
+                media_items = json.loads(media_json)
+            except json.JSONDecodeError as e:
+                print(f'❌ media-json نامعتبره: {e}')
+                sys.exit(1)
+            files = download_media_direct(media_items)
+            original_caption = args.caption
+            source = 'instagram (direct CDN)'
+
+        # ── مسیر قدیمی: فقط برای ردیت (یا اینستاگرام از طریق instaloader اگه صراحتاً بخوای) ──
         else:
-            files, original_caption = download_reddit(url)
+            url = args.url.strip()
+            if not url:
+                print('❌ یا --media-json بده یا --url (هیچ‌کدوم داده نشد)')
+                sys.exit(1)
+            source = args.source.strip().lower() or detect_source(url)
+            if source not in ('instagram', 'reddit'):
+                print(f'❌ نوع لینک ناشناخته‌ست (source={source!r}, url={url!r})')
+                sys.exit(1)
+            if source == 'instagram':
+                files, original_caption = download_instagram(url, args.ig_session)
+            else:
+                files, original_caption = download_reddit(url)
 
         print(f'📦 {len(files)} فایل دانلود شد (source={source}).')
 
