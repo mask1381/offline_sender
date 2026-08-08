@@ -11,6 +11,10 @@
 این یعنی هر اجرا از یه IP تازه‌ست (برخلاف n8n که IP ثابت داره و توسط
 ردیت/اینستاگرام راحت بلاک می‌شه) و همینجا هم fingerprint مرورگر واقعی جعل
 می‌شه (curl_cffi) که شانس رد شدن از بلاک‌ها رو بیشتر می‌کنه.
+
+اگه --ig-session (و secret به اسم IG_USERNAME) داده بشه، سمت اینستاگرام با
+اکانت واقعی لاگین می‌کنه (محدودیت نرخ درخواست خیلی بهتری نسبت به anonymous
+داره)؛ نبود سشن یا نامعتبر/منقضی بودنش، بی‌سروصدا به anonymous فال‌بک می‌کنه.
 """
 
 import argparse
@@ -107,6 +111,9 @@ class _CookieIterAdapter:
 
 
 def harden_instaloader_session(L):
+    """جعل TLS/HTTP2 fingerprint مرورگر واقعی (curl_cffi) روی سشن instaloader —
+    چه لاگین‌شده باشه چه anonymous. کوکی‌های سشن (از جمله کوکی‌های لاگین اگه
+    load_session_from_file قبلش صدا زده شده باشه) به سشن جدید منتقل می‌شن."""
     if not IG_PROXY_URL and not CURL_CFFI_IMPERSONATE:
         return
 
@@ -141,9 +148,11 @@ def harden_instaloader_session(L):
 
 
 # ─────────────────────────────────────────
-# راه‌اندازی instaloader (anonymous / بدون لاگین)
+# راه‌اندازی instaloader (اگه --ig-session و IG_USERNAME داده بشه، با اکانت
+# واقعی لاگین می‌کنه؛ در غیر این صورت — یا اگه سشن نامعتبر/منقضی بود —
+# عمداً و بی‌سروصدا به anonymous فال‌بک می‌کنه)
 # ─────────────────────────────────────────
-def build_instaloader_instance():
+def build_instaloader_instance(ig_session_path: str = ''):
     import instaloader
 
     L = instaloader.Instaloader(
@@ -155,7 +164,32 @@ def build_instaloader_instance():
         quiet=True,
         max_connection_attempts=1,  # anonymous: سریع fail بشه به‌جای retry loop طولانی
     )
-    print('ℹ️ اجرا به‌صورت anonymous (بدون لاگین) — فقط پست‌های پابلیک قابل دانلودن')
+
+    if not ig_session_path:
+        print('ℹ️ بدون سشن اجرا می‌شه (anonymous) — فقط پست‌های پابلیک قابل دانلودن')
+        harden_instaloader_session(L)
+        return L
+
+    if not os.path.exists(ig_session_path):
+        print(f'⚠️ فایل سشن پیدا نشد ({ig_session_path!r}) — ادامه به‌صورت anonymous')
+        harden_instaloader_session(L)
+        return L
+
+    if not IG_USERNAME:
+        print('⚠️ IG_USERNAME تنظیم نشده — نمی‌شه سشن رو لود کرد، ادامه به‌صورت anonymous')
+        harden_instaloader_session(L)
+        return L
+
+    try:
+        L.load_session_from_file(IG_USERNAME, ig_session_path)
+        is_logged_in = getattr(L.context, 'is_logged_in', bool(L.context.username))
+        if is_logged_in:
+            print(f'✅ لاگین اینستا با موفقیت انجام شد: {L.context.username}')
+        else:
+            print('⚠️ سشن معتبر نیست (احتمالاً منقضی شده) — ادامه به‌صورت anonymous')
+    except Exception as e:
+        print(f'⚠️ لود سشن شکست خورد ({e}) — ادامه به‌صورت anonymous')
+
     harden_instaloader_session(L)
     return L
 
@@ -183,10 +217,10 @@ def convert_webp_to_jpg(webp_path: str) -> str:
 # ─────────────────────────────────────────
 # دانلود اینستاگرام با instaloader (پشتیبانی از کروسل چند اسلایدی)
 # ─────────────────────────────────────────
-def download_instagram(url: str):
+def download_instagram(url: str, ig_session_path: str = ''):
     import instaloader
 
-    L = build_instaloader_instance()
+    L = build_instaloader_instance(ig_session_path)
 
     shortcode_match = re.search(r'/(?:p|reel|tv)/([^/?#]+)', url)
     if not shortcode_match:
@@ -382,6 +416,7 @@ def main():
     parser.add_argument('--chat-id', required=True)
     parser.add_argument('--source', required=False, default='',
                          help='instagram | reddit (اختیاری - اگه ندی از روی خود URL تشخیص داده می‌شه)')
+    parser.add_argument('--ig-session', default='', help='مسیر فایل سشن instaloader (اختیاری — نبود آن یعنی anonymous)')
     args = parser.parse_args()
 
     url = args.url.strip()
@@ -398,7 +433,7 @@ def main():
 
     try:
         if source == 'instagram':
-            files, original_caption = download_instagram(url)
+            files, original_caption = download_instagram(url, args.ig_session)
         else:
             files, original_caption = download_reddit(url)
 
