@@ -49,7 +49,7 @@ jobs:
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
         run: |
-          python scripts/download_and_send.py \
+          python scripts/download_and_send2.py \
             --url "${{ inputs.url }}" \
             --chat-id "${{ inputs.chat_id }}"
 
@@ -71,7 +71,7 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/download-send.yml/dispatches" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/download-send2.yml/dispatches" \
             -d "{\"ref\":\"${{ github.ref_name }}\",\"inputs\":{\"url\":\"${{ inputs.url }}\",\"chat_id\":\"${{ inputs.chat_id }}\",\"attempt\":\"${NEXT_ATTEMPT}\",\"max_attempts\":\"${{ inputs.max_attempts }}\"}}")
           echo "HTTP status: $HTTP_CODE"
           cat response.json
