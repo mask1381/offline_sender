@@ -233,7 +233,7 @@ def _caption_gws(cleaned_caption: str) -> str:
 def _caption_aww(cleaned_caption: str) -> str:
     # کانال والپیپر انیمه — ادرس کانال: -1004325251576
     header = f"•.❀· {bi('AWW')} ·❀.•\n\n"
-    footer = f'⟡ <a href="https://t.me/animeworldwallpape">{bi("AWW | Wallpapers Lab")}</a>'
+    footer = f'⟡ <a href="https://t.me/aniwall_lab">{bi("AWW | Wallpapers Lab")}</a>'
     return header + _quoted_body(cleaned_caption, header, footer) + footer
 
 
