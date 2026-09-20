@@ -90,7 +90,7 @@ def build_caption(original_caption: str) -> str:
 # در صورت رد شدن از سقف ۱۰۲۴ تلگرام، و حذف blockquote وقتی متن خالیه.
 # ─────────────────────────────────────────
 CLIP_MAX_SECONDS = 60
-SHOW_SOURCE = True  # لینک 🔗 Source به پست اینستاگرام (از --url)
+SHOW_SOURCE = False  # لینک 🔗 Source حذف شد (True کنی برمی‌گرده)
 
 TAXONOMY = {
     'CLIP':    {'tag': 'Clip',    'label': 'CLIP',           'emoji': '📱'},
