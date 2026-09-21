@@ -131,7 +131,7 @@ TEXT_RULES = [
     {'kind': 'BIRTHDAY', 'video': True,
      'patterns': [('text', r'birthday')]},
     {'kind': 'LEAK', 'video': False,
- 'patterns': [('text', r'\bleaks?\b|\bleaked\b|datamine|rumou?rs?|unreleased|insider|\bvia\b')]},
+     'patterns': []},},
     {'kind': 'BANNER', 'video': False,
      'patterns': [('title', r'banner|\bwish\b|\bwarp\b|character preview|character skill showcase'),
                   ('text', r'\bbanners?\b')]},
