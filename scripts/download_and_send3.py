@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 
@@ -33,7 +34,12 @@ from PIL import Image
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
-from telethon.tl.types import DocumentAttributeFilename
+from telethon.tl.types import DocumentAttributeFilename, DocumentAttributeVideo
+from telethon.extensions import html as tl_html
+try:
+    from telethon.tl.types import MessageEntityBlockquote
+except ImportError:  # Telethon خیلی قدیمی
+    MessageEntityBlockquote = None
 
 # ─────────────────────────────────────────
 # تنظیمات از Environment Variables (GitHub Secrets)
@@ -81,15 +87,17 @@ def build_caption(original_caption: str) -> str:
 #   TRAILER ← ویدیوی ۱ دقیقه یا بلندتر بدون اشاره به شخصیت
 # هر پستی که ویدیو نداشته باشه ارسال نمی‌شه.
 #
-# قالب کپشن دقیقاً مثل نود «Build Final Caption» فلوی بررسی/ارسال تلگرام:
-#   {ایموجی} <b>نوع bold-italic</b> ← <blockquote>متن</blockquote> ← 🔗 Source
+# قالب کپشن (بر پایه‌ی نود «Build Final Caption» فلوی بررسی/ارسال تلگرام):
+#   {ایموجی} <b>نوع bold-italic</b>
+#   ← <b>عنوان bold-italic</b>   (فقط اگه خط اول کوتاه بود و بعدش متن دیگه‌ای هست)
+#   ← <blockquote expandable>بقیه‌ی متن، جمع‌شونده</blockquote>
 #   ← #نوع + هشتگ‌های خود پست ← فوتر HUB/ART
 # هشتگ‌ها: فقط هشتگ نوع (#Clip / #Demo / #Trailer) ساخته می‌شه؛ بقیه دقیقاً همونایی‌ان
 # که خود کپشن اینستاگرام داره (از متن برداشته می‌شن و می‌رن توی خط هشتگ).
-# سه حفاظ که ظاهر کپشن رو عوض نمی‌کنن: escape کاراکترهای & < > ، کوتاه‌کردن متن
-# در صورت رد شدن از سقف ۱۰۲۴ تلگرام، و حذف blockquote وقتی متن خالیه.
+# متن فقط وقتی کوتاه می‌شه که از سقف ۱۰۲۴ تلگرام رد بشه؛ بدون اون، همه‌ی متن توی blockquote می‌ره.
 # ─────────────────────────────────────────
 CLIP_MAX_SECONDS = 60
+TITLE_MAX_LEN = 100  # خط اول تا این طول می‌تونه عنوان باشه
 SHOW_SOURCE = False  # لینک 🔗 Source حذف شد (True کنی برمی‌گرده)
 
 TAXONOMY = {
@@ -184,14 +192,17 @@ def meta_duration(items: list):
     return max(vals) if vals else None
 
 
-def mp4_duration_seconds(path: str):
-    """فال‌بک: مدت mp4 از اتم moov/mvhd (بدون ffprobe)."""
+def mp4_info(path: str) -> dict:
+    """مدت و ابعاد ویدیو از اتم‌های moov (mvhd + tkhd) — بدون ffprobe/hachoir.
+    خروجی: {'duration': ثانیه یا None, 'w': int, 'h': int}"""
+    info = {'duration': None, 'w': 0, 'h': 0}
+
     def walk(f, end):
         while f.tell() < end:
             pos = f.tell()
             hdr = f.read(8)
             if len(hdr) < 8:
-                return None
+                return
             size, typ = struct.unpack('>I4s', hdr)
             hlen = 8
             if size == 1:
@@ -200,11 +211,10 @@ def mp4_duration_seconds(path: str):
             elif size == 0:
                 size = end - pos
             if size < hlen:
-                return None
-            if typ == b'moov':
-                r = walk(f, pos + size)
-                if r is not None:
-                    return r
+                return
+            box_end = pos + size
+            if typ in (b'moov', b'trak'):
+                walk(f, box_end)
             elif typ == b'mvhd':
                 ver = f.read(1)[0]
                 f.read(3)
@@ -214,18 +224,74 @@ def mp4_duration_seconds(path: str):
                 else:
                     f.read(8)
                     ts, dur = struct.unpack('>II', f.read(8))
-                return dur / ts if ts else None
-            f.seek(pos + size)
-        return None
+                if ts and info['duration'] is None:
+                    info['duration'] = dur / ts
+            elif typ == b'tkhd':
+                ver = f.read(1)[0]
+                f.read(3)
+                f.read(36 if ver == 0 else 48)
+                matrix = struct.unpack('>9i', f.read(36))
+                w, h = struct.unpack('>II', f.read(8))
+                w, h = w >> 16, h >> 16
+                if matrix[0] == 0 and matrix[4] == 0:  # چرخش ۹۰/۲۷۰ درجه
+                    w, h = h, w
+                if w and h and not info['w']:
+                    info['w'], info['h'] = w, h
+            f.seek(box_end)
 
     try:
         with open(path, 'rb') as f:
             f.seek(0, 2)
             end = f.tell()
             f.seek(0)
-            return walk(f, end)
+            walk(f, end)
     except Exception:
+        pass
+    return info
+
+
+def video_attributes(path: str):
+    """DocumentAttributeVideo با مدت/ابعاد واقعی — بدون این، تلگرام ۰۰:۰۰ نشون می‌ده."""
+    info = mp4_info(path)
+    if not info['duration'] and not (info['w'] and info['h']):
         return None
+    return DocumentAttributeVideo(
+        duration=int(round(info['duration'] or 0)),
+        w=info['w'], h=info['h'], supports_streaming=True,
+    )
+
+
+def _save_thumb_jpeg(src: str, dest: str):
+    im = Image.open(src).convert('RGB')
+    im.thumbnail((320, 320))
+    im.save(dest, 'JPEG', quality=85)
+
+
+def prepare_thumb(media_items: list, files: list):
+    """کاور ویدیو برای پیش‌نمایش: اول displayUrl اپیفای (فیلد thumb توی media_json)،
+    اگه نبود اولین فریم با ffmpeg (فقط اگه نصب باشه). اگه هیچ‌کدوم نشد None."""
+    out = os.path.join(WORKDIR, 'thumb.jpg')
+    try:
+        for it in media_items or []:
+            if (it.get('type') or '').lower() == 'video' and (it.get('thumb') or '').strip():
+                src = os.path.join(WORKDIR, 'thumb_src')
+                _download_binary(build_hardened_cffi_session(), it['thumb'].strip(), src)
+                _save_thumb_jpeg(src, out)
+                return out
+    except Exception as e:
+        print(f'⚠️ دانلود کاور ویدیو نشد: {e}')
+    vids = [f for f in files if f.lower().endswith('.mp4')]
+    if vids and shutil.which('ffmpeg'):
+        try:
+            subprocess.run(
+                ['ffmpeg', '-y', '-loglevel', 'error', '-ss', '0.5', '-i', vids[0],
+                 '-frames:v', '1', '-vf', 'scale=320:-2', out],
+                check=True, timeout=60, capture_output=True)
+            if os.path.exists(out):
+                return out
+        except Exception as e:
+            print(f'⚠️ ساخت کاور با ffmpeg نشد: {e}')
+    return None
 
 
 def _u16len(s: str) -> int:
@@ -250,10 +316,25 @@ def _truncate_paragraphs(text: str, max_len: int) -> str:
     return result
 
 
+def split_title(body: str):
+    """خط اول = عنوان، به شرط اینکه کوتاه باشه و بعدش متن دیگه‌ای بیاد. وگرنه همه‌اش بدنه‌ست."""
+    lines = body.split('\n')
+    first = re.sub(r'\s{2,}', ' ', lines[0]).strip()
+    rest = '\n'.join(lines[1:]).strip()
+    if first and rest and len(first) <= TITLE_MAX_LEN:
+        return first, rest
+    return '', body
+
+
 def build_channel_caption(kind: str, original_caption: str, tags: list, post_url: str = '') -> str:
     t = TAXONOMY[kind]
     header = f"{t['emoji']} <b>{bi(t['label'])}</b>\n\n"
     link_part = f'🔗 <a href="{post_url}">{bi("Source")}</a>\n\n' if (SHOW_SOURCE and post_url) else ''
+
+    body = strip_hashtags(original_caption)
+    title, body = split_title(body) if body else ('', '')
+    # bi اول، escape بعد (وگرنه &amp; هم bold-italic می‌شد و خراب می‌شد)
+    title_part = f'<b>{html.escape(bi(title), quote=False)}</b>\n\n' if title else ''
 
     type_tag = '#' + t['tag']
     extra = [h for h in tags if h.lower() != type_tag.lower()]
@@ -262,22 +343,69 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
         return ' '.join([type_tag] + ex) + '\n\n'
 
     def budget_for(ex):
-        shell = header + link_part + tag_line(ex) + CHANNEL_FOOTER
-        # +2 برای \n\n بعد از blockquote، +5 حاشیه‌ی اطمینان (مثل نود اخبار)
+        shell = header + title_part + link_part + tag_line(ex) + CHANNEL_FOOTER
+        # +2 برای \n\n بعد از blockquote، +5 حاشیه‌ی اطمینان
         return MAX_TG_CAPTION_LEN - _visible_len(shell) - 2 - 5
 
     # اگه هشتگ‌ها اون‌قدر زیاد باشن که جایی برای متن نمونه، از آخر کم می‌کنیم
     while budget_for(extra) < 100 and extra:
         extra.pop()
 
-    body = strip_hashtags(original_caption)
+    # کوتاه‌سازی فقط برای سقف سخت تلگرام (۱۰۲۴)؛ متن عادی دست‌نخورده می‌مونه
     body = _truncate_paragraphs(body, max(50, budget_for(extra))) if body else ''
 
-    caption = header
+    caption = header + title_part
     if body:
-        caption += f'<blockquote>{html.escape(body, quote=False)}</blockquote>\n\n'
+        caption += f'<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n'
     caption += link_part + tag_line(extra) + CHANNEL_FOOTER
     return caption
+
+
+class _ExpandableHTML:
+    """parse_mode برای Telethon: مثل 'html'، ولی blockquote رو جمع‌شونده (expandable) می‌کنه.
+    نیاز به Telethon جدید داره؛ روی نسخه‌ی قدیمی blockquote معمولی می‌مونه و خطا نمی‌ده."""
+
+    _reported = False
+
+    @staticmethod
+    def _report():
+        if _ExpandableHTML._reported:
+            return
+        _ExpandableHTML._reported = True
+        try:
+            import telethon
+            ver = getattr(telethon, '__version__', '?')
+        except Exception:
+            ver = '?'
+        ok = False
+        if MessageEntityBlockquote is not None:
+            try:
+                ok = 'collapsed' in MessageEntityBlockquote.__init__.__code__.co_varnames
+            except Exception:
+                ok = False
+        print(f"ℹ️ Telethon {ver} | blockquote جمع‌شونده: {'پشتیبانی می‌شه' if ok else 'پشتیبانی نمی‌شه (معمولی می‌مونه)'}")
+
+    @staticmethod
+    def parse(text):
+        _ExpandableHTML._report()
+        plain_html = text.replace('<blockquote expandable>', '<blockquote>')
+        parsed_text, entities = tl_html.parse(plain_html)
+        if MessageEntityBlockquote is not None:
+            for e in entities:
+                if isinstance(e, MessageEntityBlockquote):
+                    try:
+                        e.collapsed = True
+                    except Exception:
+                        pass
+        return parsed_text, entities
+
+    @staticmethod
+    def unparse(text, entities):
+        return tl_html.unparse(text, entities)
+
+
+def pick_parse_mode(caption: str):
+    return _ExpandableHTML if '<blockquote expandable>' in (caption or '') else 'html'
 
 
 # ─────────────────────────────────────────
@@ -620,7 +748,7 @@ def download_reddit(url: str):
 # ─────────────────────────────────────────
 # ارسال به تلگرام با Telethon (اکانت شخصی)
 # ─────────────────────────────────────────
-async def send_items_to_telegram(files, caption, chat_id):
+async def send_items_to_telegram(files, caption, chat_id, thumb=None):
     client = TelegramClient(StringSession(TG_SESSION_STRING), int(TG_API_ID), TG_API_HASH)
     await client.connect()
 
@@ -644,7 +772,7 @@ async def send_items_to_telegram(files, caption, chat_id):
                 chat_id_value,
                 files,
                 caption=caption,
-                parse_mode='html',
+                parse_mode=pick_parse_mode(caption),
                 supports_streaming=True,
             )
             if isinstance(sent, list):
@@ -655,13 +783,21 @@ async def send_items_to_telegram(files, caption, chat_id):
             # fallback: تک‌تک (برای فایل غیرمدیا یا بیش از ۱۰ فایل)
             for f in files:
                 attributes = [DocumentAttributeFilename(os.path.basename(f))]
+                extra = {}
+                if f.lower().endswith('.mp4'):
+                    vattr = video_attributes(f)
+                    if vattr:
+                        attributes.append(vattr)
+                    if thumb:
+                        extra['thumb'] = thumb
                 sent = await client.send_file(
                     chat_id_value,
                     f,
                     caption=caption,
-                    parse_mode='html',
+                    parse_mode=pick_parse_mode(caption),
                     supports_streaming=True,
                     attributes=attributes,
+                    **extra,
                 )
                 sent_messages.append(sent)
     finally:
@@ -703,6 +839,7 @@ def main():
     media_json = args.media_json.strip()
     channel_mode = (args.caption_mode or 'raw').strip().lower() == 'channel'
     caption_override = ''
+    thumb = None
 
     if not args.dry_run:
         if not chat_id:
@@ -739,11 +876,12 @@ def main():
                     print(cap)
                     return
             files = download_media_direct(media_items)
+            thumb = prepare_thumb(media_items, files)
             original_caption = args.caption
             source = 'instagram (direct CDN)'
             if channel_mode:
                 if duration is None:
-                    ds = [mp4_duration_seconds(f) for f in files if f.lower().endswith('.mp4')]
+                    ds = [mp4_info(f)['duration'] for f in files if f.lower().endswith('.mp4')]
                     ds = [d for d in ds if d]
                     duration = max(ds) if ds else None
                 kind = classify(duration, tags)
@@ -778,7 +916,7 @@ def main():
 
         print(f'📨 در حال ارسال به تلگرام (chat_id={chat_id}, تعداد آیتم={len(files)})...')
         try:
-            sent = asyncio.run(send_items_to_telegram(files, caption, chat_id))
+            sent = asyncio.run(send_items_to_telegram(files, caption, chat_id, thumb))
             ids = ', '.join(str(s.id) for s in sent)
             print(f'✅ ارسال شد. message_id(s)={ids}')
         except FloodWaitError as e:
