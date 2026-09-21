@@ -81,11 +81,12 @@ def build_caption(original_caption: str) -> str:
 # ─────────────────────────────────────────
 # حالت کانال (--caption-mode channel)
 #
-# نوع پست فقط از «مدت ویدیو» و «اشاره به شخصیت» تعیین می‌شه (بدون کلمه‌ی کلیدی):
-#   CLIP    ← ویدیو کوتاه‌تر از ۱ دقیقه
-#   DEMO    ← ویدیوی ۱ دقیقه یا بلندتر که به شخصیت اشاره داره
-#   TRAILER ← ویدیوی ۱ دقیقه یا بلندتر بدون اشاره به شخصیت
-# هر پستی که ویدیو نداشته باشه ارسال نمی‌شه.
+# نوع پست (بدون فهرست کلمه‌ی کلیدی برای ویدیوها):
+#   ۱) قواعد متنی TEXT_RULES (تولد، لیک، بنر، ایونت، خبر) — ترتیب مهمه
+#   ۲) ویدیوی بدون قاعده‌ی متنی: زیر ۱ دقیقه CLIP | ۱ دقیقه یا بیشتر: DEMO (اگه به شخصیت
+#      اشاره داشته باشه) وگرنه TRAILER
+#   ۳) پست عکسی بدون قاعده: طبق UNMATCHED_NON_VIDEO (پیش‌فرض ارسال نمی‌شه)
+# برای دیدن نوع پست‌های واقعی بدون ارسال:  --caption-mode channel --test-file items.json
 #
 # قالب کپشن (بر پایه‌ی نود «Build Final Caption» فلوی بررسی/ارسال تلگرام):
 #   {ایموجی} <b>نوع bold-italic</b>
@@ -100,11 +101,49 @@ CLIP_MAX_SECONDS = 60
 TITLE_MAX_LEN = 100  # خط اول تا این طول می‌تونه عنوان باشه
 SHOW_SOURCE = False  # لینک 🔗 Source حذف شد (True کنی برمی‌گرده)
 
+# ===== TAXONOMY — تنها جای تعریف دسته‌ها (همون نود Build Final Caption) =====
 TAXONOMY = {
-    'CLIP':    {'tag': 'Clip',    'label': 'CLIP',           'emoji': '📱'},
-    'DEMO':    {'tag': 'Demo',    'label': 'CHARACTER DEMO', 'emoji': '🎥'},
-    'TRAILER': {'tag': 'Trailer', 'label': 'TRAILER',        'emoji': '🎬'},
+    'LEAK':          {'tag': 'Leak',          'label': 'LEAK',           'emoji': '⚡️'},
+    'NEWS':          {'tag': 'News',          'label': 'NEWS',           'emoji': '📢'},
+    'OFFICIAL':      {'tag': 'Official',      'label': 'OFFICIAL',       'emoji': '🏢'},
+    'BANNER':        {'tag': 'Banner',        'label': 'BANNER',         'emoji': '🎴'},
+    'EVENT':         {'tag': 'Event',         'label': 'EVENT',          'emoji': '🎉'},
+    'EVENTSPREVIEW': {'tag': 'EventsPreview', 'label': 'EVENTS PREVIEW', 'emoji': '📅'},
+    'CODE':          {'tag': 'Code',          'label': 'REDEEM CODE',    'emoji': '🔑'},
+    'BIRTHDAY':      {'tag': 'Birthday',      'label': 'BIRTHDAY',       'emoji': '🎂'},
+    'GUIDE':         {'tag': 'Guide',         'label': 'GUIDE',          'emoji': '📖'},
+    'ART':           {'tag': 'Art',           'label': 'ART',            'emoji': '🎨'},
+    'TRAILER':       {'tag': 'Trailer',       'label': 'TRAILER',        'emoji': '🎬'},
+    'DEMO':          {'tag': 'Demo',          'label': 'CHARACTER DEMO', 'emoji': '🎥'},
+    'CLIP':          {'tag': 'Clip',          'label': 'CLIP',           'emoji': '📱'},
+    'STREAM':        {'tag': 'Stream',        'label': 'STREAM',         'emoji': '📡'},
+    'LIVE':          {'tag': 'Live',          'label': 'LIVE',           'emoji': '🔴'},
 }
+
+# ===== قواعد متنی — تنها جای تعریف «چی چیه»؛ برای نوع/قاعده‌ی جدید فقط یه ردیف اضافه کن =====
+# ترتیب مهمه: اولین قاعده‌ای که بخوره برنده‌ست.
+#   kind     : کلید TAXONOMY
+#   video    : True = روی پست‌های ویدیویی هم اعمال بشه؛ False = فقط عکس/آلبوم
+#              (ویدیوی بدون قاعده‌ی متنی می‌ره سراغ قاعده‌ی مدت: کلیپ/دمو/تریلر)
+#   patterns : لیست (scope, regex) — 'title' = خط اول کپشن (بدون هشتگ)، 'text' = کل کپشن
+# الگوهای BANNER/EVENT از نود «کانال اخبار گنشین» گرفته شدن؛ LEAK/NEWS پیشنهادیه — ویرایش کن.
+TEXT_RULES = [
+    {'kind': 'BIRTHDAY', 'video': True,
+     'patterns': [('text', r'birthday')]},
+    {'kind': 'LEAK', 'video': False,
+     'patterns': [('text', r'\bleaks?\b|\bleaked\b|datamine|rumou?rs?|unreleased|insider')]},
+    {'kind': 'BANNER', 'video': False,
+     'patterns': [('title', r'banner|\bwish\b|\bwarp\b|character preview|character skill showcase'),
+                  ('text', r'\bbanners?\b')]},
+    {'kind': 'EVENT', 'video': False,
+     'patterns': [('text', r'event duration'), ('title', r'\bevents?\b')]},
+    {'kind': 'NEWS', 'video': False,
+     'patterns': [('title', r'announcement|maintenance|patch notes|pre-install|pre install|compensation|'
+                            r'update details|version details|known issues')]},
+]
+
+# پست عکسی/آلبومی که هیچ قاعده‌ای نخوره: None = ارسال نشه | 'NEWS' = به‌عنوان خبر بره
+UNMATCHED_NON_VIDEO = None
 
 # هشتگ‌هایی که اسم بازی/شرکت یا خود نوع محتوا هستن و «اشاره به شخصیت» حساب نمی‌شن.
 # (کوچک‌حرف و بدون فاصله/زیرخط نوشته بشن)
@@ -177,6 +216,48 @@ def classify(duration, tags: list):
     return 'DEMO' if mentions_character(tags) else 'TRAILER'
 
 
+def _first_line(caption: str) -> str:
+    body = strip_hashtags(caption or '')
+    return body.split('\n')[0].strip() if body else ''
+
+
+def decide_type(media_items: list, caption: str, duration=None):
+    """تصمیم نوع پست → (kind, why).
+    kind: کلید TAXONOMY | 'PENDING' (ویدیو و مدتش هنوز معلوم نیست) | None (ارسال نشه)
+    ترتیب: قواعد متنی (TEXT_RULES) ← اگه ویدیو بود قاعده‌ی مدت (کلیپ/دمو/تریلر) ← UNMATCHED_NON_VIDEO"""
+    has_video = any((i.get('type') or '').lower() == 'video' for i in media_items)
+    title = _first_line(caption)
+    for rule in TEXT_RULES:
+        if has_video and not rule['video']:
+            continue
+        for scope, pattern in rule['patterns']:
+            m = re.search(pattern, title if scope == 'title' else (caption or ''), re.I)
+            if m:
+                return rule['kind'], f"قاعده‌ی {rule['kind']} ({scope}) روی «{m.group(0)}»"
+    if has_video:
+        if duration is None:
+            return 'PENDING', 'ویدیو — مدت هنوز معلوم نیست'
+        tags = extract_hashtags(caption)
+        return classify(duration, tags), f'ویدیو {duration:.0f}s | شخصیت={mentions_character(tags)}'
+    if UNMATCHED_NON_VIDEO:
+        return UNMATCHED_NON_VIDEO, 'هیچ قاعده‌ای نخورد → نوع پیش‌فرض'
+    return None, 'پست بدون ویدیو و بدون قاعده‌ی متنی'
+
+
+def run_test_file(path: str):
+    """--test-file: لیست آیتم‌های n8n ({caption, mediaJson, shortcode}) → نوع و دلیل هر پست."""
+    with open(path, encoding='utf-8') as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        data = [data]
+    for it in data:
+        j = it.get('json', it)
+        media = j.get('media') or json.loads(j.get('mediaJson') or '[]')
+        cap = j.get('caption', '')
+        kind, why = decide_type(media, cap, meta_duration(media))
+        print(f"{str(j.get('shortcode', '?')):<13} {str(kind):<9} {why} | «{_first_line(cap)[:50]}»")
+
+
 def meta_duration(items: list):
     """بلندترین مدت ویدیو از فیلد duration که n8n (Apify videoDuration) داده."""
     vals = []
@@ -195,7 +276,7 @@ def meta_duration(items: list):
 def mp4_info(path: str) -> dict:
     """مدت و ابعاد ویدیو از اتم‌های moov (mvhd + tkhd) — بدون ffprobe/hachoir.
     خروجی: {'duration': ثانیه یا None, 'w': int, 'h': int}"""
-    info = {'duration': None, 'w': 0, 'h': 0}
+    info = {'duration': None, 'w': 0, 'h': 0, 'codecs': [], 'fragmented': False}
 
     def walk(f, end):
         while f.tell() < end:
@@ -213,8 +294,15 @@ def mp4_info(path: str) -> dict:
             if size < hlen:
                 return
             box_end = pos + size
-            if typ in (b'moov', b'trak'):
+            if typ in (b'moov', b'trak', b'mdia', b'minf', b'stbl'):
                 walk(f, box_end)
+            elif typ == b'moof':
+                info['fragmented'] = True
+            elif typ == b'stsd':
+                f.read(8)  # version/flags + entry_count
+                entry = f.read(8)
+                if len(entry) == 8:
+                    info['codecs'].append(entry[4:8].decode('latin-1'))
             elif typ == b'mvhd':
                 ver = f.read(1)[0]
                 f.read(3)
@@ -250,14 +338,33 @@ def mp4_info(path: str) -> dict:
     return info
 
 
-def video_attributes(path: str):
-    """DocumentAttributeVideo با مدت/ابعاد واقعی — بدون این، تلگرام ۰۰:۰۰ نشون می‌ده."""
+def _pos_num(v):
+    try:
+        v = float(v)
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def video_attributes(path: str, meta: dict = None, thumb_path: str = None):
+    """DocumentAttributeVideo با مدت/ابعاد واقعی — بدون این، تلگرام ۰۰:۰۰ و جعبه‌ی سیاه نشون می‌ده.
+    اولویت: مقدار n8n/Apify (duration, w, h) ← خود فایل mp4 ← نسبت ابعاد کاور.
+    (فایل‌های اینستاگرام گاهی fragmented‌ن و مدت داخلشون صفره، برای همین متادیتای Apify مقدم‌تره.)"""
+    meta = meta or {}
     info = mp4_info(path)
-    if not info['duration'] and not (info['w'] and info['h']):
+    duration = _pos_num(meta.get('duration')) or info['duration']
+    w = int(_pos_num(meta.get('w')) or info['w'] or 0)
+    h = int(_pos_num(meta.get('h')) or info['h'] or 0)
+    if not (w and h) and thumb_path:
+        try:
+            w, h = Image.open(thumb_path).size
+        except Exception:
+            pass
+    if not duration and not (w and h):
         return None
     return DocumentAttributeVideo(
-        duration=int(round(info['duration'] or 0)),
-        w=info['w'], h=info['h'], supports_streaming=True,
+        duration=int(round(duration or 0)),
+        w=w or 1, h=h or 1, supports_streaming=True,
     )
 
 
@@ -748,7 +855,7 @@ def download_reddit(url: str):
 # ─────────────────────────────────────────
 # ارسال به تلگرام با Telethon (اکانت شخصی)
 # ─────────────────────────────────────────
-async def send_items_to_telegram(files, caption, chat_id, thumb=None):
+async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta=None):
     client = TelegramClient(StringSession(TG_SESSION_STRING), int(TG_API_ID), TG_API_HASH)
     await client.connect()
 
@@ -785,9 +892,17 @@ async def send_items_to_telegram(files, caption, chat_id, thumb=None):
                 attributes = [DocumentAttributeFilename(os.path.basename(f))]
                 extra = {}
                 if f.lower().endswith('.mp4'):
-                    vattr = video_attributes(f)
+                    meta = video_meta if len(files) == 1 else None
+                    vattr = video_attributes(f, meta, thumb)
+                    finfo = mp4_info(f)
+                    print(f"🎞️ فایل: codec={finfo['codecs']} fragmented={finfo['fragmented']} "
+                          f"duration(file)={finfo['duration']} | ابعاد(file)={finfo['w']}x{finfo['h']}")
                     if vattr:
                         attributes.append(vattr)
+                        print(f'🎞️ attribute ارسالی: duration={vattr.duration}s ابعاد={vattr.w}x{vattr.h} '
+                              f"| کاور={'دارد' if thumb else 'ندارد'}")
+                    else:
+                        print('⚠️ attribute ویدیو ساخته نشد (نه متادیتا، نه فایل، نه کاور)')
                     if thumb:
                         extra['thumb'] = thumb
                 sent = await client.send_file(
@@ -831,15 +946,22 @@ def main():
                          help='[فقط fallback قدیمی instaloader] مسیر فایل سشن — برای مسیر اصلی (--media-json) لازم نیست')
     parser.add_argument('--caption-mode', default='raw',
                          help="raw = کپشن دست‌نخورده (پیش‌فرض) | channel = نوع (کلیپ/دمو/تریلر) + قالب کانال")
+    parser.add_argument('--test-file', default='',
+                         help='JSON لیست آیتم‌های n8n ({caption, mediaJson}) — فقط نوع/دلیل هر پست چاپ می‌شه')
     parser.add_argument('--dry-run', action='store_true',
                          help='فقط نوع و کپشن رو چاپ کن؛ نه دانلود، نه ارسال (برای تست قواعد)')
     args = parser.parse_args()
+
+    if args.test_file:
+        run_test_file(args.test_file)
+        return
 
     chat_id = args.chat_id.strip()
     media_json = args.media_json.strip()
     channel_mode = (args.caption_mode or 'raw').strip().lower() == 'channel'
     caption_override = ''
     thumb = None
+    video_meta = None
 
     if not args.dry_run:
         if not chat_id:
@@ -859,36 +981,41 @@ def main():
                 sys.exit(1)
             duration = None
             tags = []
+            kind = None
             if channel_mode:
-                if not any((i.get('type') or '').lower() == 'video' for i in media_items):
-                    print('⏭️ پست ویدیو نداره — طبق قاعده ارسال نمی‌شه')
-                    return
-                duration = meta_duration(media_items)
                 tags = extract_hashtags(args.caption)
+                duration = meta_duration(media_items)
+                kind, why = decide_type(media_items, args.caption, duration)
+                if kind is None:
+                    print(f'⏭️ ارسال نمی‌شه — {why}')
+                    return
+                if kind != 'PENDING':
+                    print(f'🏷️ نوع={kind} | {why}')
                 if args.dry_run:
-                    kind = classify(duration, tags)
-                    if kind is None:
+                    if kind == 'PENDING':
                         print('⚠️ dry-run: فیلد duration نیومده (بعد از دانلود از خود فایل خونده می‌شه)')
                         return
-                    print(f'🧪 duration={duration}s | شخصیت={mentions_character(tags)} | نوع={kind}')
                     cap = build_channel_caption(kind, args.caption, tags, args.url.strip())
                     print(f'🧪 طول قابل‌نمایش: {_visible_len(cap)}/{MAX_TG_CAPTION_LEN}\n')
                     print(cap)
                     return
             files = download_media_direct(media_items)
-            thumb = prepare_thumb(media_items, files)
+            if any((i.get('type') or '').lower() == 'video' for i in media_items):
+                thumb = prepare_thumb(media_items, files)
+                print(f"🖼️ کاور ویدیو: {'آماده شد' if thumb else 'ساخته نشد'}")
+                video_meta = next((i for i in media_items if (i.get('type') or '').lower() == 'video'), None)
             original_caption = args.caption
             source = 'instagram (direct CDN)'
             if channel_mode:
-                if duration is None:
+                if kind == 'PENDING':
                     ds = [mp4_info(f)['duration'] for f in files if f.lower().endswith('.mp4')]
                     ds = [d for d in ds if d]
                     duration = max(ds) if ds else None
-                kind = classify(duration, tags)
-                if kind is None:
-                    print('❌ مدت ویدیو مشخص نشد (نه از Apify، نه از خود فایل)')
-                    sys.exit(1)
-                print(f'🏷️ duration={duration:.1f}s | شخصیت={mentions_character(tags)} | نوع={kind}')
+                    if duration is None:
+                        print('❌ مدت ویدیو مشخص نشد (نه از Apify، نه از خود فایل)')
+                        sys.exit(1)
+                    kind, why = decide_type(media_items, args.caption, duration)
+                    print(f'🏷️ نوع={kind} | {why}')
                 caption_override = build_channel_caption(kind, args.caption, tags, args.url.strip())
 
         # ── مسیر قدیمی: فقط برای ردیت (یا اینستاگرام از طریق instaloader اگه صراحتاً بخوای) ──
@@ -916,7 +1043,7 @@ def main():
 
         print(f'📨 در حال ارسال به تلگرام (chat_id={chat_id}, تعداد آیتم={len(files)})...')
         try:
-            sent = asyncio.run(send_items_to_telegram(files, caption, chat_id, thumb))
+            sent = asyncio.run(send_items_to_telegram(files, caption, chat_id, thumb, video_meta))
             ids = ', '.join(str(s.id) for s in sent)
             print(f'✅ ارسال شد. message_id(s)={ids}')
         except FloodWaitError as e:
