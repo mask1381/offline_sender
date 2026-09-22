@@ -175,11 +175,10 @@ def bi(text: str) -> str:
 
 HASHTAG_RE = re.compile(r'#\w+', re.UNICODE)
 
-CHANNEL_FOOTER = (
-`𝐓𝐇𝐄 𝐆𝐀𝐂𝐇𝐀𝐕𝐄𝐑𝐒𝐄  ›\n│\n` +
-`├─ 📰 <a href="https://t.me/+Wf91O38uSB9kMzg8">𝐆𝐚𝐜𝐡𝐚 𝐍𝐞𝐰𝐬</a>\n` +
-`└─ 🎨 <a href="https://t.me/+TeQbrf_cIyljY2Zk">𝐀𝐫𝐭 𝐀𝐫𝐜𝐡𝐢𝐯𝐞</a>`
-)
+CHANNEL_FOOTER = """𝐓𝐇𝐄 𝐆𝐀𝐂𝐇𝐀𝐕𝐄𝐑𝐒𝐄  ›
+│
+├─ 📰 <a href="https://t.me/+Wf91O38uSB9kMzg8">𝐆𝐚𝐜𝐡𝐚 𝐍𝐞𝐰𝐬</a>
+└─ 🎨 <a href="https://t.me/+TeQbrf_cIyljY2Zk">𝐀𝐫𝐭 𝐀𝐫𝐜𝐡𝐢𝐯𝐞</a>"""
 
 
 def extract_hashtags(text: str) -> list:
