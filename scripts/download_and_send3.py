@@ -176,8 +176,9 @@ def bi(text: str) -> str:
 HASHTAG_RE = re.compile(r'#\w+', re.UNICODE)
 
 CHANNEL_FOOTER = (
-    '💠 <a href="https://t.me/+Wf91O38uSB9kMzg8">⋙ 𝐆𝐀𝐂𝐇𝐀𝐕𝐄𝐑𝐒𝐄 • 𝐇𝐔𝐁</a>\n'
-    '💠 <a href="https://t.me/+TeQbrf_cIyljY2Zk">⋙ 𝐆𝐀𝐂𝐇𝐀𝐕𝐄𝐑𝐒𝐄 • 𝐀𝐑𝐓</a>'
+`𝐓𝐇𝐄 𝐆𝐀𝐂𝐇𝐀𝐕𝐄𝐑𝐒𝐄  ›\n` +
+`├─ 📰 <a href="https://t.me/+Wf91O38uSB9kMzg8">𝐆𝐀𝐂𝐇𝐀 𝐍𝐄𝐖𝐒</a>\n` +
+`└─ 🎨 <a href="https://t.me/+TeQbrf_cIyljY2Zk">𝐀𝐑𝐓 𝐀𝐑𝐂𝐇𝐈𝐕𝐄</a>`
 )
 
 
