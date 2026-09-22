@@ -131,20 +131,20 @@ TEXT_RULES = [
     {'kind': 'BIRTHDAY', 'video': True,
      'patterns': [('text', r'birthday')]},
     {'kind': 'LEAK', 'video': False,
-     'patterns': []},
+     'patterns': [('text', r'\bleak(ed|s)?\b|datamine[rd]?|unconfirmed|reportedly')]},
     {'kind': 'BANNER', 'video': False,
-     'patterns': [('title', r'banner|\bwish\b|\bwarp\b|character preview|character skill showcase'),
-                  ('text', r'\bbanners?\b')]},
+     'patterns': [('title', r'banner|\bwish\b|\bwarp\b|\bconvene\b|character preview|character skill showcase|resonator convene|weapon convene|epitomized path'),
+                  ('text', r'\bbanners?\b|\bconvenes?\b')]},
     {'kind': 'EVENT', 'video': False,
-     'patterns': [('text', r'event duration'), ('title', r'\bevents?\b')]},
+     'patterns': [('text', r'event duration|\bduration\s*:|\bbundle\b|pop-?up|\bmerch\b|\btour\b|sales?\s*hours?|story event'),
+                  ('title', r'\bevents?\b')]},
     {'kind': 'NEWS', 'video': False,
      'patterns': [('title', r'announcement|maintenance|patch notes|pre-install|pre install|compensation|'
-                            r'update details|version details|known issues')]},
+                            r'update details|version details|known issues|phase\s*(ii|2)|kickoff|update available')]},
 ]
 
 # پست عکسی/آلبومی که هیچ قاعده‌ای نخوره: None = ارسال نشه | 'NEWS' = به‌عنوان خبر بره
-UNMATCHED_NON_VIDEO = None
-
+UNMATCHED_NON_VIDEO = 'NEWS'
 # هشتگ‌هایی که اسم بازی/شرکت یا خود نوع محتوا هستن و «اشاره به شخصیت» حساب نمی‌شن.
 # (کوچک‌حرف و بدون فاصله/زیرخط نوشته بشن)
 GENERIC_TAGS = {
