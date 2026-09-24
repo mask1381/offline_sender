@@ -80,6 +80,14 @@ def git_commit_and_push(pages_file: str, message: str) -> bool:
 # ─────────────────────────────────────────
 # Apify — گرفتن پست‌های اخیر یه پیج
 # ─────────────────────────────────────────
+def to_js_iso(ts: int) -> str:
+    """معادل دقیق new Date(ts*1000).toISOString() جاوااسکریپت —
+    فرمت ...THH:MM:SS.mmmZ (نه +00:00). Apify actor فقط این فرمت رو قبول می‌کنه؛
+    فرمت +00:00 پیش‌فرض isoformat() پایتون با 400 Bad Request رد می‌شه."""
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
 def call_apify(username: str, newer_than_ts: int):
     body = {
         "username": [username],
@@ -87,9 +95,7 @@ def call_apify(username: str, newer_than_ts: int):
         "skipPinnedPosts": True,
     }
     if newer_than_ts:
-        body["onlyPostsNewerThan"] = datetime.fromtimestamp(
-            newer_than_ts, tz=timezone.utc
-        ).isoformat()
+        body["onlyPostsNewerThan"] = to_js_iso(newer_than_ts)
 
     resp = requests.post(
         "https://api.apify.com/v2/acts/apify~instagram-post-scraper/run-sync-get-dataset-items",
