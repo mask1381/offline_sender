@@ -451,7 +451,7 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
         return ' '.join([type_tag] + ex) + '\n\n'
 
     def budget_for(ex):
-        shell = header + title_part + link_part + tag_line(ex) + CHANNEL_FOOTER
+        shell = title_part + link_part + tag_line(ex) + CHANNEL_FOOTER
         # +2 برای \n\n بعد از blockquote، +5 حاشیه‌ی اطمینان
         return MAX_TG_CAPTION_LEN - _visible_len(shell) - 2 - 5
 
@@ -459,11 +459,10 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
     while budget_for(extra) < 100 and extra:
         extra.pop()
 
-    # کوتاه‌سازی فقط برای سقف سخت تلگرام (۱۰۲۴)؛ متن عادی دست‌نخورده می‌مونه
     body = _truncate_paragraphs(body, max(50, budget_for(extra))) if body else ''
 
-caption = title_part
-if body:
+    caption = title_part
+    if body:
         caption += f'<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n'
     caption += link_part + tag_line(extra) + CHANNEL_FOOTER
     return caption
