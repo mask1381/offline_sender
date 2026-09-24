@@ -437,7 +437,6 @@ def split_title(body: str):
 
 def build_channel_caption(kind: str, original_caption: str, tags: list, post_url: str = '') -> str:
     t = TAXONOMY[kind]
-    header = f"{t['emoji']} <b>{bi(t['label'])}</b>\n\n"
     link_part = f'🔗 <a href="{post_url}">{bi("Source")}</a>\n\n' if (SHOW_SOURCE and post_url) else ''
 
     body = strip_hashtags(original_caption)
@@ -463,8 +462,8 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
     # کوتاه‌سازی فقط برای سقف سخت تلگرام (۱۰۲۴)؛ متن عادی دست‌نخورده می‌مونه
     body = _truncate_paragraphs(body, max(50, budget_for(extra))) if body else ''
 
-    caption = header + title_part
-    if body:
+caption = title_part
+if body:
         caption += f'<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n'
     caption += link_part + tag_line(extra) + CHANNEL_FOOTER
     return caption
