@@ -14,6 +14,12 @@ commit به pages.json بعد از هر پیج انجام می‌شه (نه در
 Generic/آینده‌نگر: لیست پیج‌ها و chat_id مقصد از --pages-file و --chat-id
 گرفته می‌شن، پس همین اسکریپت رو می‌شه برای پروژه/کانال دیگه هم با یه pages_*.json
 و chat_id متفاوت صدا زد — بدون ساختن فایل جدید.
+
+فال‌بک صدا: بعضی پیج‌ها (مثل wuthering_waves) از Apify یه videoUrl بی‌صدا
+برمی‌گردونن (نسخه‌ی preview autoplay فید، نه فایل اصلی). بعد از دانلود، هر
+فایل mp4 از نظر داشتن track صوتی چک می‌شه؛ اگه نداشت، همون پست با
+instaloader (تابع مشترک از download_and_send3.py) دوباره گرفته می‌شه که
+مستقیم از صفحه‌ی پست می‌گیره و نسخه‌ی کامل رو برمی‌گردونه.
 """
 
 import argparse
@@ -38,6 +44,9 @@ import download_and_send3 as dsend  # noqa: E402
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
 APIFY_RESULTS_LIMIT = 12  # کمی بیشتر از MAX_PER_PAGE برای اطمینان از پوشش کامل
+
+# فورکدهای شناخته‌شده‌ی صوتی توی باکس stsd (mp4_info آماده می‌ده)
+AUDIO_CODEC_FOURCCS = {"mp4a", "ac-3", "ec-3", "opus", "alac", "samr", "sawb"}
 
 
 # ─────────────────────────────────────────
@@ -169,14 +178,7 @@ def fetch_new_posts(page: dict) -> list:
 
     if len(new_posts) > MAX_PER_PAGE:
         new_posts = new_posts[-MAX_PER_PAGE:]
-    # ─── DEBUG موقت: خروجی خام Apify برای پست‌های ویدیویی رو چاپ کن ───
-    for p in new_posts:
-        if p.get("videoUrl") or any(
-            c.get("videoUrl") for c in (p.get("childPosts") or [])
-        ):
-            print(f"🐞 DEBUG raw video post ({page['username']} / {p.get('shortCode')}):")
-            print(json.dumps(p, ensure_ascii=False, indent=2))
-    # ─── پایان DEBUG ───
+
     return [
         {
             "shortcode": p["shortCode"],
@@ -187,6 +189,42 @@ def fetch_new_posts(page: dict) -> list:
         }
         for p in new_posts
     ]
+
+
+# ─────────────────────────────────────────
+# تشخیص نبود صدا + fallback با instaloader
+# ─────────────────────────────────────────
+def has_audio_track(path: str) -> bool:
+    info = dsend.mp4_info(path)
+    codecs = [c.lower() for c in info.get("codecs", [])]
+    return any(c in AUDIO_CODEC_FOURCCS for c in codecs)
+
+
+def ensure_audio(files: list, post_url: str, shortcode: str) -> tuple:
+    """اگه هر کدوم از فایل‌های mp4 بی‌صدا بودن، کل پست رو با instaloader
+    دوباره می‌گیره (چون instaloader مستقیم از صفحه‌ی پست می‌گیره، نه از
+    لینک CDN که Apify داده). خروجی: (files_جدید_یا_قدیمی, replaced: bool)."""
+    video_files = [f for f in files if f.lower().endswith(".mp4")]
+    if not video_files:
+        return files, False
+
+    if all(has_audio_track(f) for f in video_files):
+        return files, False
+
+    print(f"🔇 {shortcode}: ویدیو بدون صدا از لینک مستقیم CDN — تلاش برای گرفتن نسخه‌ی کامل با instaloader")
+    reset_workdir()
+    try:
+        new_files, _ = dsend.download_instagram(post_url, "")
+    except SystemExit:
+        print(f"⚠️ {shortcode}: fallback instaloader شکست خورد — همون نسخه‌ی بی‌صدا فرستاده می‌شه")
+        # فایل‌های اصلی پاک شدن (reset_workdir)، پس دوباره از CDN می‌گیریم
+        return None, False
+    except Exception as e:
+        print(f"⚠️ {shortcode}: fallback instaloader خطا داد ({e}) — همون نسخه‌ی بی‌صدا فرستاده می‌شه")
+        return None, False
+
+    print(f"✅ {shortcode}: نسخه‌ی با صدا از instaloader گرفته شد")
+    return new_files, True
 
 
 # ─────────────────────────────────────────
@@ -220,10 +258,20 @@ def send_post(post: dict, chat_id: str, caption_mode: str) -> bool:
 
     files = dsend.download_media_direct(media_items)
 
+    # ─── چک صدا و fallback (اگه لازم بود) ───
+    files_after, replaced = ensure_audio(files, post["url"], post["shortcode"])
+    if files_after is None:
+        # fallback fail شد و workdir پاک شده بود — دوباره از CDN بگیر
+        files = dsend.download_media_direct(media_items)
+    else:
+        files = files_after
+
     thumb, video_meta = None, None
     if any((i.get("type") or "").lower() == "video" for i in media_items):
         thumb = dsend.prepare_thumb(media_items, files)
-        video_meta = next(
+        # اگه fallback جایگزین شد، متادیتای duration/w/h اپیفای دیگه معتبر نیست؛
+        # video_attributes خودش از خود فایل mp4 مقدار واقعی رو می‌خونه
+        video_meta = None if replaced else next(
             (i for i in media_items if (i.get("type") or "").lower() == "video"), None
         )
 
@@ -250,6 +298,8 @@ def send_post(post: dict, chat_id: str, caption_mode: str) -> bool:
 # main
 # ─────────────────────────────────────────
 def main():
+    sys.stdout.reconfigure(line_buffering=True)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--pages-file", default="pages.json")
     parser.add_argument("--chat-id", required=True)
