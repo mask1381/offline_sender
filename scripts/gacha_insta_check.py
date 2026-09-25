@@ -169,7 +169,14 @@ def fetch_new_posts(page: dict) -> list:
 
     if len(new_posts) > MAX_PER_PAGE:
         new_posts = new_posts[-MAX_PER_PAGE:]
-
+    # ─── DEBUG موقت: خروجی خام Apify برای پست‌های ویدیویی رو چاپ کن ───
+    for p in new_posts:
+        if p.get("videoUrl") or any(
+            c.get("videoUrl") for c in (p.get("childPosts") or [])
+        ):
+            print(f"🐞 DEBUG raw video post ({page['username']} / {p.get('shortCode')}):")
+            print(json.dumps(p, ensure_ascii=False, indent=2))
+    # ─── پایان DEBUG ───
     return [
         {
             "shortcode": p["shortCode"],
