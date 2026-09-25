@@ -1,0 +1,14 @@
+{
+  "TraditionalWear": {
+    "tag": "TraditionalWear",
+    "patterns": ["kimono", "yukata", "furisode", "hakama", "haori", "hanfu", "cheongsam", "qipao", "china dress"]
+  },
+  "SeasonalVibes": {
+    "tag": "SeasonalVibes",
+    "patterns": ["christmas", "halloween", "sakura", "cherry blossom", "cherry blossoms", "snowing", "snowfall", "fireworks", "valentine", "valentines"]
+  },
+  "SchoolLife": {
+    "tag": "SchoolLife",
+    "patterns": ["school uniform", "gakuran", "serafuku", "sailor uniform", "sailor collar", "classroom"]
+  }
+}
