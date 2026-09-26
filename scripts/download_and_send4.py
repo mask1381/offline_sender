@@ -33,7 +33,7 @@ DICTIONARY_PATH = os.environ.get("CHARACTER_DICTIONARY_PATH", os.path.join(REPO_
 HASHTAG_RULES_PATH = os.environ.get("HASHTAG_RULES_PATH", os.path.join(REPO_ROOT, "hashtag_rules.json"))
 
 MAX_CHARACTER_TAGS = 3
-MAX_DESCRIPTIVE_TAGS = 2
+MAX_DESCRIPTIVE_TAGS = 3
 MIN_SEEN_SINGLE = 3          # اسم‌های تک‌کلمه‌ای (بدون فاصله) حداقل این‌قدر seen_count لازم دارن
 MIN_FRANCHISE_KEY_LEN = 4    # کلید فرنچایز کوتاه‌تر از این، فقط با تطبیق دقیق قبول می‌شه نه شامل‌بودن
 MIN_FRANCHISE_PREFIX_LEN = 5 # حداقل طول کلید برای مجاز بودن تطبیق «پیشوندی» (#genshin ← genshinimpact)
@@ -284,7 +284,9 @@ def detect_descriptive_tags(full_text: str) -> list:
     found = []
     for _key, rule in _RULES.items():
         for pattern in rule.get('patterns', []):
-            if pattern in low:
+            # مرز کلمه اجباریه — وگرنه «training» به‌غلط شامل زیررشته‌ی
+            # «raining» تشخیص داده می‌شه (باگ واقعی که تست کرد)
+            if re.search(r'\b' + re.escape(pattern) + r'\b', low):
                 found.append(rule.get('tag') or _key)
                 break
         if len(found) >= MAX_DESCRIPTIVE_TAGS:
