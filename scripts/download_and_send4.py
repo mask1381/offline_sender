@@ -73,8 +73,11 @@ def compact(s: str) -> str:
 
 
 def to_hashtag(name: str) -> str:
-    """'Hu Tao' -> 'HuTao' ، 'Genshin Impact' -> 'GenshinImpact'"""
-    parts = re.split(r'[^0-9a-zA-Z\u00c0-\uffff]+', str(name or ''))
+    """'Hu Tao' -> 'HuTao' ، 'Genshin Impact' -> 'GenshinImpact'
+    اگه اسم «:» داشت (مثل 'Mushoku Tensei: Isekai Ittara Honki Dasu')، فقط
+    قسمت قبل از «:» گرفته می‌شه تا هشتگ خیلی طولانی نشه ('MushokuTensei')."""
+    name = str(name or '').split(':', 1)[0]
+    parts = re.split(r'[^0-9a-zA-Z\u00c0-\uffff]+', name)
     return ''.join(p[:1].upper() + p[1:] for p in parts if p)
 
 
