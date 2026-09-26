@@ -5,10 +5,70 @@
   },
   "SeasonalVibes": {
     "tag": "SeasonalVibes",
-    "patterns": ["christmas", "halloween", "sakura", "cherry blossom", "cherry blossoms", "snowing", "snowfall", "fireworks", "valentine", "valentines"]
+    "patterns": ["christmas", "halloween", "sakura", "cherry blossom", "cherry blossoms", "snowing", "snowfall", "fireworks", "valentine", "valentines", "autumn leaves", "summer vacation"]
   },
   "SchoolLife": {
     "tag": "SchoolLife",
-    "patterns": ["school uniform", "gakuran", "serafuku", "sailor uniform", "sailor collar", "classroom"]
+    "patterns": ["school uniform", "gakuran", "serafuku", "sailor uniform", "sailor collar", "classroom", "schoolgirl", "schoolboy"]
+  },
+  "ActionTraining": {
+    "tag": "ActionTraining",
+    "patterns": ["training", "workout", "gym", "muscle", "sparring", "training arc", "leveling up", "level up"]
+  },
+  "Battle": {
+    "tag": "Battle",
+    "patterns": ["battle", "fight scene", "duel", "versus", "clash", "showdown", "final battle", "sword fight"]
+  },
+  "Romance": {
+    "tag": "Romance",
+    "patterns": ["romance", "confession", "crush", "love story", "first love", "couple goals", "ship", "otp"]
+  },
+  "Music": {
+    "tag": "Music",
+    "patterns": ["idol", "concert", "band", "singing", "music video", "live stage", "microphone"]
+  },
+  "Sports": {
+    "tag": "Sports",
+    "patterns": ["volleyball", "basketball", "soccer", "football match", "tournament", "championship", "baseball", "tennis match"]
+  },
+  "Mecha": {
+    "tag": "Mecha",
+    "patterns": ["mecha", "gundam", "robot pilot", "giant robot", "cockpit"]
+  },
+  "Fantasy": {
+    "tag": "Fantasy",
+    "patterns": ["magic spell", "wizard", "dungeon", "isekai", "adventurer party", "guild quest", "summoned"]
+  },
+  "SliceOfLife": {
+    "tag": "SliceOfLife",
+    "patterns": ["slice of life", "cozy day", "everyday life", "morning routine", "lazy afternoon"]
+  },
+  "Horror": {
+    "tag": "Horror",
+    "patterns": ["horror", "creepy", "haunted", "nightmare", "monster attack", "curse"]
+  },
+  "SciFi": {
+    "tag": "SciFi",
+    "patterns": ["spaceship", "space station", "cyberpunk", "futuristic city", "sci-fi", "android"]
+  },
+  "Beach": {
+    "tag": "Beach",
+    "patterns": ["beach episode", "swimsuit", "bikini", "poolside", "summer beach", "ocean waves"]
+  },
+  "Rain": {
+    "tag": "Rain",
+    "patterns": ["rainy day", "raining", "umbrella", "rain scene"]
+  },
+  "Night": {
+    "tag": "Night",
+    "patterns": ["night sky", "starry night", "moonlight", "city lights at night", "midnight"]
+  },
+  "Cafe": {
+    "tag": "Cafe",
+    "patterns": ["cafe date", "coffee shop", "tea time", "bakery"]
+  },
+  "Festival": {
+    "tag": "Festival",
+    "patterns": ["festival", "matsuri", "fireworks festival", "shrine visit", "carnival"]
   }
 }
