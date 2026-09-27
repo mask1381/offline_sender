@@ -1,37 +1,44 @@
 #!/usr/bin/env python3
 """
-aniwall_insta_check.py — چک دوره‌ای پیج‌های اینستاگرام برای کانال اصلی aniwall_lab.
+aniwall_insta_check.py — چک شبانه‌ی پیج‌های اینستاگرام برای کانال aniwall_lab.
 
-دقیقاً همون الگوی gacha_insta_check.py: پیج‌های aniwall_pages.json (فایل جدا،
-مستقل از pages.json خود گچا) رو مستقیم از Apify می‌خونه، پست جدید رو دانلود و
-با کپشن «فقط هشتگ» (download_and_send4.build_hashtag_caption) به کانال
-می‌فرسته، و بعد از هر پیجِ موفق state (last_post_id/last_post_taken_at) رو
-commit/push می‌کنه. اگه ارسال یه پست fail کنه، state دست‌نخورده می‌مونه و دفعه‌ی
-بعد دوباره retry می‌شه — هیچ پستی گم نمی‌شه.
+برخلاف نسخه‌ی اول، اینجا دو مرحله‌ایه:
+  ۱) همه‌ی پیج‌های aniwall_pages.json چک می‌شن و هرچی پست جدید هست جمع می‌شه
+     (بدون ارسال فوری، بدون توجه به ترتیب بین پیج‌ها).
+  ۲) بر اساس تعداد کل پست‌های جمع‌شده، هر کدوم با قابلیت schedule تلگرام توی
+     یه بازه‌ی ۲۴ساعته پخش می‌شن: از ۱ ساعت بعد از همین اجرا تا ۲ ساعت قبل
+     از اجرای فردا شب. این یعنی بین ۱۲ شب (وقتی اسکریپت اجرا می‌شه) تا ۱ شب،
+     و همچنین از ۱۰ شب تا ۱۲ شب، هیچ پستی زمان‌بندی نمی‌شه — تا وقت داشته
+     باشی قبل از هر انتشار، از بخش Scheduled Messages تلگرام پست‌ها رو ببینی
+     و در صورت نیاز دخالت کنی.
 
-هیچ منطق دانلود/ارسال از صفر نوشته نشده: از download_and_send3.py (پایه) و
-download_and_send4.py (کپشن هشتگی) import می‌شه.
+تریگر این اسکریپت کاملاً دستیه (نه cron) — خود کاربر هر شب ساعت ۱۲ صداش می‌زنه.
+
+هیچ منطق دانلود/ورد نویسی از صفر نیست: از download_and_send3.py (دانلود،
+entity resolution) و download_and_send4.py (کپشن هشتگی + ارسال زمان‌دار)
+import می‌شه.
 """
 
 import argparse
 import asyncio
 import json
 import os
-import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 import requests
 from telethon.errors import FloodWaitError
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import download_and_send3 as dsend3          # noqa: E402 — دانلود/ارسال/entity resolution
-import download_and_send4 as dsend4          # noqa: E402 — کپشن هشتگی/دیکشنری
+import download_and_send3 as dsend3          # noqa: E402 — دانلود/entity resolution
+import download_and_send4 as dsend4          # noqa: E402 — کپشن هشتگی/ارسال زمان‌دار
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
 APIFY_RESULTS_LIMIT = 12
+SCHEDULE_CALL_GAP_SECONDS = 5.0   # فاصله‌ی واقعی بین هر schedule call (محض اطمینان، نه فاصله‌ی نمایش)
 
 
 # ─────────────────────────────────────────
@@ -49,7 +56,6 @@ def save_pages(path: str, pages: list):
 
 
 def git_commit_and_push(pages_file: str, message: str) -> bool:
-    """کامیت و پوش تغییرات aniwall_pages.json. اگه چیزی برای کامیت نبود، بی‌سروصدا True برمی‌گردونه."""
     try:
         subprocess.run(["git", "config", "user.name", "aniwall-insta-bot"], check=True)
         subprocess.run(["git", "config", "user.email", "aniwall-insta-bot@users.noreply.github.com"], check=True)
@@ -160,42 +166,98 @@ def fetch_new_posts(page: dict) -> list:
     ]
 
 
-# ─────────────────────────────────────────
-# دانلود + کپشن‌سازی + ارسال یه پست
-# ─────────────────────────────────────────
 def reset_workdir():
+    import shutil
     shutil.rmtree(dsend3.WORKDIR, ignore_errors=True)
     os.makedirs(dsend3.WORKDIR, exist_ok=True)
 
 
-def send_post(post: dict, chat_id: str) -> bool:
-    """True = هندل شد (چه بفرسته چه عمداً skip کنه) → state آپدیت بشه.
-    False/exception = شکست واقعی → state آپدیت نشه، دفعه‌ی بعد retry بشه."""
-    media_items = post["media_items"]
-    caption_raw = post["caption"]
-    shortcode = post["shortcode"]
+# ─────────────────────────────────────────
+# مرحله‌ی ۱: جمع‌آوری همه‌ی پست‌های قابل‌ارسالِ همه‌ی پیج‌ها
+# ─────────────────────────────────────────
+def collect_sendable_posts(pages: list) -> list:
+    """خروجی: لیستی از {"page": page_dict, "post": post_dict, "caption": html}
+    فقط شامل پست‌هایی که رد نشدن (نه ویدیو، نه بی‌ربط)."""
+    to_send = []
+    for page in pages:
+        username = page["username"]
+        print(f"\n━━━ چک پیج: {username} ━━━")
+        try:
+            new_posts = fetch_new_posts(page)
+        except Exception as e:
+            print(f"⚠️ چک {username} شکست خورد ({e}) — رد شد، state دست‌نخورده می‌مونه")
+            continue
 
-    if not media_items:
-        print(f'⏭️ {shortcode}: بدون رسانه — رد شد')
-        return True
+        if not new_posts:
+            print("ℹ️ پست جدیدی نیست")
+            continue
 
-    if any((i.get("type") or "").lower() == "video" for i in media_items):
-        print(f'⏭️ {shortcode}: پست ویدیوئه — طبق قانون کانال ارسال نمی‌شه')
-        return True
+        print(f"📬 {len(new_posts)} پست جدید")
+        for post in new_posts:
+            shortcode = post["shortcode"]
+            media_items = post["media_items"]
 
-    caption, why = dsend4.build_hashtag_caption(caption_raw)
-    if caption is None:
-        print(f'⏭️ {shortcode}: {why}')
-        return True
-    print(f'🏷️ {shortcode}: {why}')
+            if not media_items:
+                print(f'⏭️ {shortcode}: بدون رسانه — رد شد (ولی state جلو می‌ره)')
+                page["last_post_id"] = shortcode
+                page["last_post_taken_at"] = post["takenAt"]
+                continue
 
-    reset_workdir()
-    files = dsend3.download_media_direct(media_items)
+            if any((i.get("type") or "").lower() == "video" for i in media_items):
+                print(f'⏭️ {shortcode}: پست ویدیوئه — رد شد (ولی state جلو می‌ره)')
+                page["last_post_id"] = shortcode
+                page["last_post_taken_at"] = post["takenAt"]
+                continue
 
-    sent = asyncio.run(dsend3.send_items_to_telegram(files, caption, chat_id))
-    ids = ", ".join(str(s.id) for s in sent)
-    print(f'✅ {shortcode} ارسال شد. message_id(s)={ids}')
-    return True
+            caption, why = dsend4.build_hashtag_caption(post["caption"])
+            if caption is None:
+                print(f'⏭️ {shortcode}: {why} — رد شد (ولی state جلو می‌ره)')
+                page["last_post_id"] = shortcode
+                page["last_post_taken_at"] = post["takenAt"]
+                continue
+
+            print(f'🏷️ {shortcode}: {why}')
+            to_send.append({"page": page, "post": post, "caption": caption})
+
+    return to_send
+
+
+# ─────────────────────────────────────────
+# مرحله‌ی ۲: زمان‌بندی و ارسال
+# ─────────────────────────────────────────
+def schedule_all(to_send: list, chat_id: str):
+    if not to_send:
+        print("\nℹ️ هیچ پستی برای زمان‌بندی نبود")
+        return
+
+    now = datetime.now(timezone.utc)
+    times = dsend4.compute_schedule_times(now, len(to_send))
+
+    print(f"\n🗓️ {len(to_send)} پست، زمان‌بندی بین "
+          f"{times[0].strftime('%H:%M UTC')} تا {times[-1].strftime('%H:%M UTC')}")
+
+    for item, when in zip(to_send, times):
+        page = item["page"]
+        post = item["post"]
+        shortcode = post["shortcode"]
+        try:
+            reset_workdir()
+            files = dsend3.download_media_direct(post["media_items"])
+            sent = asyncio.run(
+                dsend4.send_photo_album_scheduled(files, item["caption"], chat_id, schedule_dt=when)
+            )
+            ids = ", ".join(str(s.id) for s in sent)
+            print(f"✅ {shortcode} زمان‌بندی شد برای {when.strftime('%Y-%m-%d %H:%M UTC')} "
+                  f"(message_id(s)={ids})")
+            page["last_post_id"] = shortcode
+            page["last_post_taken_at"] = post["takenAt"]
+        except FloodWaitError as e:
+            print(f"⏳ FloodWait: {e.seconds} ثانیه — توقف کل ران (state تا همینجا ثبت می‌شه)")
+            break
+        except Exception as e:
+            print(f"❌ زمان‌بندی {shortcode} شکست خورد ({e}) — این پیج از همینجا برای دفعه‌ی بعد retry می‌شه")
+            # state این پست جلو نمی‌ره، ولی بقیه‌ی پیج‌ها/پست‌ها ادامه پیدا می‌کنن
+        time.sleep(SCHEDULE_CALL_GAP_SECONDS)
 
 
 # ─────────────────────────────────────────
@@ -219,45 +281,12 @@ def main():
         print("ℹ️ aniwall_pages.json خالیه — هیچ پیجی برای چک کردن نیست")
         return
 
-    for page in pages:
-        username = page["username"]
-        print(f"\n━━━ پیج: {username} ━━━")
-        try:
-            new_posts = fetch_new_posts(page)
-        except Exception as e:
-            print(f"⚠️ چک {username} شکست خورد ({e}) — رد شد، state دست‌نخورده می‌مونه")
-            continue
+    to_send = collect_sendable_posts(pages)
+    schedule_all(to_send, args.chat_id)
 
-        if not new_posts:
-            print("ℹ️ پست جدیدی نیست")
-            continue
-
-        print(f"📬 {len(new_posts)} پست جدید")
-        page_advanced = False
-
-        for post in new_posts:
-            try:
-                ok = send_post(post, args.chat_id)
-            except FloodWaitError as e:
-                print(f"⏳ FloodWait: {e.seconds} ثانیه — توقف کل ران")
-                if page_advanced:
-                    save_pages(args.pages_file, pages)
-                    git_commit_and_push(args.pages_file, f"aniwall-insta: partial update {username} (flood wait)")
-                sys.exit(2)
-            except Exception as e:
-                print(f'❌ ارسال {post["shortcode"]} شکست خورد ({e}) — توقف این پیج، retry دفعه‌ی بعد')
-                break
-            else:
-                if ok:
-                    page["last_post_id"] = post["shortcode"]
-                    page["last_post_taken_at"] = post["takenAt"]
-                    page_advanced = True
-                else:
-                    break
-
-        if page_advanced:
-            save_pages(args.pages_file, pages)
-            git_commit_and_push(args.pages_file, f"aniwall-insta: update {username} → {page['last_post_id']}")
+    # هر پیجی که state ش (چه با ارسال، چه با رد آگاهانه) جلو رفته، اینجا ذخیره می‌شه
+    save_pages(args.pages_file, pages)
+    git_commit_and_push(args.pages_file, "aniwall-insta: nightly check + schedule")
 
     print("\n✅ تمام شد")
 

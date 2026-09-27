@@ -351,6 +351,56 @@ def _load_dsend3():
     return dsend3
 
 
+async def send_photo_album_scheduled(files, caption, chat_id, schedule_dt=None):
+    """ارسال آلبوم عکس با قابلیت زمان‌بندی تلگرام (schedule=<datetime>).
+    عمداً از send3.send_items_to_telegram جدا نوشته شده (نه import مستقیم و
+    نه ویرایش خودِ send3.py که فایل عملیاتی مشترکه): چون این مسیر همیشه فقط
+    عکسه (ویدیو قبلاً رد شده)، نیازی به منطق ویدیو/thumb ندارد و ساده‌تره.
+    بخش «resolve کردن chat_id» عیناً از send3 کپی شده چون همون باگ سشن تازه
+    (نمی‌تونه کانال رو با آی‌دی خام پیدا کنه) اینجا هم صادقه."""
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+
+    dsend3 = _load_dsend3()
+    client = TelegramClient(StringSession(dsend3.TG_SESSION_STRING), int(dsend3.TG_API_ID), dsend3.TG_API_HASH)
+    await client.connect()
+    try:
+        chat_id_value = int(chat_id) if str(chat_id).lstrip('-').isdigit() else chat_id
+        try:
+            chat_id_value = await client.get_input_entity(chat_id_value)
+        except ValueError:
+            await client.get_dialogs()
+            chat_id_value = await client.get_input_entity(chat_id_value)
+
+        sent = await client.send_file(
+            chat_id_value,
+            files,
+            caption=caption,
+            parse_mode='html',
+            supports_streaming=True,
+            schedule=schedule_dt,
+        )
+        return sent if isinstance(sent, list) else [sent]
+    finally:
+        await client.disconnect()
+
+
+def compute_schedule_times(now, count, start_offset_hours=2.0, end_offset_hours=1.0, cycle_hours=24.0):
+    """زمان‌های زمان‌بندی رو برای `count` پست، پخش‌شده توی بازه‌ی خنثی‌شده برمی‌گردونه.
+    اولین پست حداقل start_offset_hours بعد از لحظه‌ی اجرا (پیش‌فرض ۲ ساعت)،
+    آخرین پست دقیقاً end_offset_hours قبل از تریگر بعدی (پیش‌فرض ۱ ساعت، ۲۴
+    ساعت بعد). اگه فقط ۱ پست باشه، وسط همین بازه قرار می‌گیره."""
+    from datetime import timedelta
+    window_start = now + timedelta(hours=start_offset_hours)
+    window_end = now + timedelta(hours=cycle_hours - end_offset_hours)
+    if count <= 0:
+        return []
+    if count == 1:
+        return [window_start + (window_end - window_start) / 2]
+    step = (window_end - window_start) / (count - 1)
+    return [window_start + i * step for i in range(count)]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--chat-id', required=False, default='')
