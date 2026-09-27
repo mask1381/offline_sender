@@ -1,26 +1,127 @@
-# yt-genshin — Instagram → Telegram (one-shot uploader) 🚀
+# offline_sender
 
-A small CLI tool to download an Instagram post (single video, image, or multi-slide carousel) and send selected slides to a Telegram chat or channel. Designed to run as a short-lived job (e.g. in GitHub Actions): temporary files are cleaned up after the job finishes.
+یک مجموعه ابزار Python برای دانلود محتوای اینستاگرام و ردیت و ارسال خودکار آن‌ها به تلگرام. این پروژه برای اجرای کوتاه‌مدت و بدون سرور دائمی (مثل GitHub Actions یا VM‌های موقت) طراحی شده است.
 
-## Key features ✨
+## خلاصه پروژه
 
-- Download Instagram posts with `instaloader` (anonymous or with a saved session).
-- `preview` mode: send interactive preview messages via a Telegram Bot so an operator can toggle which slides to keep.
-- `send` mode: send the selected slides as a media album using a Telegram user session (Telethon).
-- Safety guard: in `send` mode, if `--slides` is empty or parses to no valid indices, the script will abort to avoid unintentionally sending everything.
-- Caption cleanup: the original Instagram caption is cleaned from boilerplate/CTA blocks (e.g. cover art, hashtags, follow/like prompts) before being embedded in a blockquote in the final caption. The final caption is trimmed to respect Telegram's 1024-character limit.
+این مخزن شامل چند اسکریپت مستقل است که هر کدام برای یکی از سناریوهای مختلف ارسال محتوا به تلگرام ساخته شده‌اند:
 
-## Repo layout 📁
+- دانلود پست‌های اینستاگرام/ردیت
+- ارسال عکس، ویدیو و آلبوم چندتایی به کانال یا چت تلگرام
+- بررسی دوره‌ای پیج‌های اینستاگرام
+- تشخیص پست‌های جدید
+- زمان‌بندی ارسال در بازه‌های مشخص
+- تولید هشتگ‌های استاندارد برای کپشن کانال
 
-- `scripts/download_and_send.py` — main script and logic
+## ساختار پوشه‌ها و فایل‌ها
 
-## Requirements 🧰
+```text
+offline_sender/
+├── README.md
+├── requirements.txt
+├── character_dictionary.csv
+├── hashtag_rules.json
+├── aniwall_pages.json
+├── scripts/
+│   ├── download_and_send2.py
+│   ├── download_and_send3.py
+│   ├── download_and_send4.py
+│   ├── gacha_insta_check.py
+│   └── aniwall_insta_check.py
+└── .
+```
+
+## ابزارهای اصلی
+
+### 1) scripts/download_and_send3.py
+
+نسخه اصلی و عملیاتی برای دانلود و ارسال محتوا به تلگرام.
+
+ویژگی‌ها:
+- پشتیبانی از اینستاگرام و ردیت
+- تشخیص خودکار نوع لینک
+- دانلود تصاویر، ویدیوها و پست‌های چنداسلایدی
+- ارسال تکی یا آلبوم به تلگرام
+- پشتیبانی از Anonymous و Login-based Instagram flows
+- استفاده از `curl_cffi` برای تقلید از fingerprint مرورگر
+
+### 2) scripts/download_and_send2.py
+
+نسخه سبک‌تر و ساده‌تر نسبت به `download_and_send3.py`.
+
+### 3) scripts/download_and_send4.py
+
+نسخه‌ای که روی تولید کپشن هشتگ‌دار و ارسال با قالب کانال تمرکز دارد.
+
+ویژگی‌ها:
+- استخراج هشتگ‌های مرتبط از متن پست
+- استفاده از `character_dictionary.csv`
+- ساخت کپشن نهایی با هشتگ‌های استاندارد کانال
+- حذف متن‌های زائد، لینک‌ها و تبلیغات از کپشن نهایی
+
+### 4) scripts/gacha_insta_check.py
+
+اسکریپت بررسی دوره‌ای پیج‌های اینستاگرام.
+
+ویژگی‌ها:
+- چک کردن پیج‌ها از فایل JSON
+- شناسایی پست‌های جدید
+- ثبت وضعیت هر پیج به‌صورت state-based
+- ارسال موفق فقط بعد از آپدیت state و commit
+- retry خودکار اگر ارسال شکست بخورد
+
+### 5) scripts/aniwall_insta_check.py
+
+نسخه‌ی شبانه برای کانال `aniwall_lab`.
+
+ویژگی‌ها:
+- جمع‌آوری پست‌های جدید از چند پیج
+- زمان‌بندی ارسال در بازه‌های خاص روز
+- جلوگیری از ارسال در ساعات خاص
+- استفاده از منطق `download_and_send3.py` و `download_and_send4.py`
+
+## وابستگی‌ها
+
+فایل `requirements.txt` شامل موارد زیر است:
+
+```txt
+telethon
+requests
+cryptg
+curl_cffi>=0.7.1
+Pillow
+git+https://github.com/instaloader/instaloader.git@refs/pull/2706/head
+```
+
+### توضیح کوتاه
+
+- `telethon`: رابط کاربری برای ارسال محتوا از طریق تلگرام
+- `requests`: درخواست‌های HTTP
+- `cryptg`: بهینه‌سازی cryptography برای Telethon
+- `curl_cffi`: ساخت fingerprint مرورگر برای بهتر شدن نرخ موفقیت درخواست‌ها
+- `Pillow`: پردازش و اصلاح تصاویر
+- `instaloader`: دانلود محتوای اینستاگرام
+
+## نسخه Python
 
 - Python 3.8+
-- Dependencies (examples): `instaloader`, `telethon`, `pillow`, `requests`
-- Optional: `curl_cffi` to better impersonate browser fingerprints and use proxies
 
-Install (example):
+## متغیرهای محیطی
+
+### متغیرهای الزامی برای تلگرام
+
+- `TG_API_ID` — API ID تلگرام
+- `TG_API_HASH` — API HASH تلگرام
+- `TG_SESSION_STRING` — StringSession Telethon
+
+### متغیرهای اختیاری
+
+- `IG_USERNAME` — نام کاربری اینستاگرام برای لاگین با سشن
+- `APIFY_TOKEN` — توکن Apify برای اسکریپت‌های بررسی پیج
+- `CHARACTER_DICTIONARY_PATH` — مسیر فایل `character_dictionary.csv`
+- `HASHTAG_RULES_PATH` — مسیر فایل `hashtag_rules.json`
+
+## نحوه نصب
 
 ```bash
 python -m venv .venv
@@ -28,92 +129,62 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Environment variables (important) 🔒
+## مثال استفاده
 
-- `TG_API_ID` — Telethon API ID (required for `--mode send`)
-- `TG_API_HASH` — Telethon API hash (required for `--mode send`)
-- `TG_SESSION_STRING` — Telethon session string (required for `--mode send`)
-- `TG_BOT_TOKEN` — Telegram Bot token (required for `--mode preview`)
-- `REGISTER_SLIDE_WEBHOOK_URL` — (optional) webhook used to register each previewed slide as `selected=true` in your n8n Data Table
-- `IG_PROXY_URL` — (optional) residential proxy for Instagram requests
-- `IG_USERNAME` — (optional) Instagram username when loading a session file
-- `CROP_BOTTOM_PERCENT` — percentage cropped from the bottom of images (default `0.10`)
-
-## Usage
-
-Preview mode (bot-driven selection) 💬
+### ارسال یک پست به تلگرام
 
 ```bash
-export TG_BOT_TOKEN="123:ABC..."
-python scripts/download_and_send.py \
-  --mode preview \
+export TG_API_ID="..."
+export TG_API_HASH="..."
+export TG_SESSION_STRING="..."
+
+python scripts/download_and_send3.py \
   --url "https://www.instagram.com/p/SHORTCODE/" \
-  --chat-id <TELEGRAM_CHAT_ID>
+  --chat-id 123456789
 ```
 
-- Sends each slide as a preview message with inline buttons.
-- The script will call `REGISTER_SLIDE_WEBHOOK_URL` (if configured) to mark each slide as selected by default.
-
-Send mode (final upload using Telethon) 📤
+### بررسی پیج‌های اینستاگرام
 
 ```bash
-export TG_API_ID="..." TG_API_HASH="..." TG_SESSION_STRING="..."
-python scripts/download_and_send.py \
-  --mode send \
-  --url "https://www.instagram.com/p/SHORTCODE/" \
-  --chat-id <TELEGRAM_CHAT_ID> \
-  --slides "1,3"
+export APIFY_TOKEN="..."
+
+python scripts/gacha_insta_check.py \
+  --pages-file aniwall_pages.json \
+  --chat-id 123456789
 ```
 
-Important: In `--mode send` you MUST provide `--slides`. If `--slides` is empty or parses to no valid integers, the script will abort with an error and exit code `1` to prevent accidental mass-sending.
+### زمان‌بندی انتشار برای کانال
 
-Error example when `--slides` is empty:
-
+```bash
+python scripts/aniwall_insta_check.py \
+  --pages-file aniwall_pages.json \
+  --chat-id 123456789
 ```
-❌ هیچ اسلایدی انتخاب نشده - از ارسال خودداری شد
-```
 
-(That message is printed to stderr and the process exits with status code 1.)
+## رفتارهای مهم
 
-## Caption cleanup rules 🧹
+- اگر `download_and_send` در حالت send هیچ اسلایدی انتخاب نشود، عملیات متوقف می‌شود.
+- اگر ارسال به تلگرام با FloodWait مواجه شود، اسکریپت متوقف می‌شود و وضعیت را گزارش می‌کند.
+- در حالت‌های حساس، سشن اینستاگرام به‌صورت fallback به anonymous می‌افتد.
+- اجرای پروژه به‌صورت VM موقت و بدون سرور دائمی طراحی شده است.
 
-The script applies a cleaning step to the Instagram post's original caption before placing it inside a `<blockquote>` in the final caption. Behavior:
+## کدهای خروجی
 
-1. The caption is split into paragraph-like blocks by double-newlines (`\n\n`).
-2. Any block that starts (case-insensitive) with a known boilerplate prefix is removed. The current conservative prefixes include:
-   - `✦ Cover Art`
-   - `✦ Hashtags`
-   - `↠ Leaks and News`
-   - `↠ Like & Follow`
-   - `↠ Leaks`
-   - `↠ Like`
-3. Remaining blocks are re-joined with `\n\n` and used as the quoted original caption.
-4. If the cleaned caption is not considered "meaningful" (heuristic `_caption_has_meaningful_text`), the blockquote is omitted entirely.
-5. After building the full caption (header + optional blockquote + footer), it is truncated according to Telegram's 1024-character limit (the script calculates a budget for the blockquote so the final caption fits).
+- `0` — اجرای موفق
+- `1` — خطای ورودی، تنظیمات یا داده‌ها
+- `2` — خطای FloodWait در تلگرام
 
-Notes:
-- The script does NOT add the source username itself. If the original caption contains a `Source: ...` line, that line is preserved by the cleaning logic.
-- The cleaning is intentionally conservative — it removes only recognized CTA/boilerplate blocks. You can extend the prefix list or change to regex-based matching if your source pages use other formats.
+## نکات فنی
 
-## Exit codes & behavior
+- پروژه به‌صورت استاتیک و ephemeral طراحی شده است؛ یعنی معمولاً هر اجرا در محیطی کوتاه‌مدت و بدون حفظ دائمی وضعیت انجام می‌شود.
+- برای کاهش بلاک شدن IP، از `curl_cffi` و تغییر IP/محیط اجرا استفاده می‌شود.
+- منطق تشخیص پست جدید و commit وضعیت برای جلوگیری از گم‌شدن پست‌ها طراحی شده است.
+- ساختار کدها به گونه‌ای است که اسکریپت‌های مختلف از یکدیگر استفاده می‌کنند، بدون اینکه کل منطق در یک فایل قرار بگیرد.
 
-- `0` — success
-- `1` — user/configuration error (e.g. missing Telegram session variables, no slides selected in `send` mode, nothing downloaded)
-- `2` — Telegram FloodWait (the script prints wait time and exits)
+## لایسنس
 
-## Development & testing 🧪
-
-- Unit tests are recommended for `clean_original_caption()` to validate removal rules against real captions from source pages.
-- You can run local tests by mocking Telegram APIs (both bot and Telethon) to verify preview/send flows without contacting real services.
-
-## Where changes were made
-
-This README and the recent fixes (safety around `--slides` in `send` mode and `clean_original_caption`) live on the branch `fix/send-slides-caption-cleanup`.
-
-## License
-
-Add a license of your choice (e.g. MIT) in `LICENSE` if you plan to share publicly.
+در حال حاضر لایسنس رسمی برای این مخزن تعیین نشده است. اگر قصد انتشار عمومی پروژه را داشته باشید، توصیه می‌شود یک لایسنس مثل MIT یا Apache 2.0 اضافه شود.
 
 ---
 
-If you want, I can commit this README into the branch `fix/send-slides-caption-cleanup` now and then open a PR to merge it into `main`. Should I proceed?
+این README بر اساس ساختار فعلی مخزن، اسکریپت‌های موجود و وابستگی‌های واقعی پروژه به‌روزرسانی شده است.
