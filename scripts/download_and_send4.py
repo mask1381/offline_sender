@@ -32,8 +32,6 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DICTIONARY_PATH = os.environ.get("CHARACTER_DICTIONARY_PATH", os.path.join(REPO_ROOT, "character_dictionary.csv"))
 HASHTAG_RULES_PATH = os.environ.get("HASHTAG_RULES_PATH", os.path.join(REPO_ROOT, "hashtag_rules.json"))
 
-MAX_CHARACTER_TAGS = 3
-MAX_DESCRIPTIVE_TAGS = 3
 MIN_SEEN_SINGLE = 3          # اسم‌های تک‌کلمه‌ای (بدون فاصله) حداقل این‌قدر seen_count لازم دارن
 MIN_FRANCHISE_KEY_LEN = 4    # کلید فرنچایز کوتاه‌تر از این، فقط با تطبیق دقیق قبول می‌شه نه شامل‌بودن
 MIN_FRANCHISE_PREFIX_LEN = 5 # حداقل طول کلید برای مجاز بودن تطبیق «پیشوندی» (#genshin ← genshinimpact)
@@ -45,6 +43,12 @@ DENY = {
     'ribbon', 'dress', 'skirt', 'bell', 'heart', 'cake', 'feet', 'wings', 'halo', 'gem',
     'ring', 'boots', 'hat', 'jacket', 'necklace', 'earrings', 'gloves', 'tights', 'fruit',
     'navel', 'bird',
+    # کلمه‌های عمومیِ رنگ/لقب که به‌عنوان جزئی از اسم شخصیت‌ها زیادن ولی به‌تنهایی
+    # هیچ اطلاعاتی ندارن (نمونه‌ی واقعی باگ: «Black» از «Black Maria» با هشتگ
+    # #blackbeard قاطی شد، چون blackbeard با «black» شروع می‌شه)
+    'black', 'white', 'red', 'blue', 'gold', 'golden', 'silver', 'green', 'dark', 'bright',
+    'king', 'queen', 'lord', 'lady', 'big', 'little', 'young', 'old', 'mr', 'saint', 'holy',
+    'great', 'grand', 'prince', 'princess',
 }
 
 FALLBACK_TAG = 'AnimeArt'
@@ -59,6 +63,24 @@ GENERIC_HASHTAGS = {
     'waifu', 'waifus', 'husbando', 'weeb', 'otaku', 'cosplay', 'fyp', 'viral',
     'reels', 'reel', 'explore', 'explorepage', 'trending', 'trendingnow',
     'love', 'cute', 'aesthetic', 'instagood', 'instareach', 'follow', 'like',
+}
+
+# هشتگ‌های خالص «ترند/تعامل‌گیری اینستاگرام» — چیزهایی که مردم پای هر پستی
+# می‌زنن تا الگوریتم دیده‌شون کنه، هیچ ربطی به محتوای واقعی پست (فرنچایز/
+# کاراکتر/سبک) ندارن. عمداً از GENERIC_HASHTAGS جدا نگه داشته شده که مدیریتش
+# راحت‌تر باشه (این‌ها صرفاً اسپم تعامل‌گیری‌ان، نه اصطلاح توصیفیِ عمومی هنر).
+INSTAGRAM_TREND_HASHTAGS = {
+    'fyp', 'fypage', 'foryou', 'foryoupage', 'foryourpage', 'viral', 'viralpost',
+    'viralreels', 'viralvideo', 'trend', 'trending', 'trendingnow', 'trendingreels',
+    'explore', 'explorepage', 'reelsinstagram', 'reelitfeelit', 'instareels',
+    'instagood', 'instadaily', 'instalike', 'instamood', 'instapic', 'instaphoto',
+    'instagramreels', 'igers', 'igdaily', 'picoftheday', 'photooftheday',
+    'bestoftheday', 'follow', 'followme', 'followforfollowback', 'follow4follow',
+    'f4f', 'like4like', 'likeforlike', 'likeforlikes', 'l4l', 'commentforcomment',
+    'tagsforlikes', 'share', 'shoutout', 'repost', 'growmyaccount', 'boostmyaccount',
+    'algorithm', 'newpost', 'dailypost', 'contentcreator', 'creatorsoninstagram',
+    'artistsoninstagram', 'supportsmallartists', 'smallartist', 'like', 'likes',
+    'comment', 'comments', 'subscribe', 'follownow',
 }
 
 HASHTAG_RE = re.compile(r'#(\w+)', re.UNICODE)
@@ -125,6 +147,17 @@ def load_dictionary(path: str) -> Dictionary:
             char_rows_global.setdefault(c_key, []).append((character_name, franchise_name, seen))
             if f_key:
                 char_rows_by_franchise.setdefault(f_key, []).append((c_key, character_name, seen))
+                # علاوه بر کلید کامل («Donquixote Doflamingo» → donquixotedoflamingo)،
+                # کلید تک‌تکِ کلمات اسم هم اضافه می‌شه («Doflamingo» → doflamingo) تا
+                # هشتگی مثل #doflamingo (فقط نام خانوادگی، بدون کل اسم) هم پیدا بشه.
+                # این با substring دلبخواهی فرق داره (نمونه‌ی باگ Nami/dynamic):
+                # فقط کلمه‌های واقعیِ خودِ اسم به‌عنوان کلید اضافه می‌شن، نه هر زیررشته‌ای.
+                words = character_name.strip().split()
+                if len(words) > 1:
+                    for w in words:
+                        w_key = compact(w)
+                        if w_key and w_key not in DENY and len(w_key) >= 3:
+                            char_rows_by_franchise[f_key].append((w_key, character_name, seen))
 
     return Dictionary(franchise_map, char_rows_by_franchise, char_rows_global)
 
@@ -183,6 +216,23 @@ def extract_hashtags_compact(text: str) -> list:
     return [compact(h) for h in HASHTAG_RE.findall(text or '') if compact(h)]
 
 
+def extract_raw_hashtag_names(text: str) -> list:
+    """هشتگ‌های خام پست (به ترتیب ظاهر)، بعد از حذف چرت‌های عمومی/ترند اینستا/DENY
+    و تکراری‌ها. خروجی: لیست رشته‌های خام هشتگ (بدون #) — این‌ها مستقیم به
+    خروجی نهایی اضافه می‌شن، مکملِ چیزی که از دیکشنری تشخیص داده می‌شه."""
+    out = []
+    seen = set()
+    for h in HASHTAG_RE.findall(text or ''):
+        key = compact(h)
+        if not key or key in seen:
+            continue
+        if key in GENERIC_HASHTAGS or key in DENY or key in INSTAGRAM_TREND_HASHTAGS:
+            continue
+        seen.add(key)
+        out.append(h)
+    return out
+
+
 def text_ngrams(text: str, max_n: int = 5) -> set:
     """عبارت‌های ۱ تا max_n کلمه‌ی متوالی، فشرده‌شده — برای تطبیق دقیق اسم‌های چندکلمه‌ای."""
     tokens = [t.lower() for t in WORD_RE.findall(text or '')]
@@ -202,7 +252,7 @@ def detect_franchise(hashtags: list, ngrams: set):
     scores = {}  # canonical name -> امتیاز
 
     for h in hashtags:
-        if h in GENERIC_HASHTAGS:
+        if h in GENERIC_HASHTAGS or h in INSTAGRAM_TREND_HASHTAGS:
             continue
         for key, name in _DICT.franchise_sorted:
             if len(key) < MIN_FRANCHISE_KEY_LEN:
@@ -247,7 +297,15 @@ def detect_characters(hashtags: list, ngrams: set, franchise_name: str) -> list:
         candidates_sorted = sorted(candidates, key=lambda c: -len(c[0]))
         for h in hashtags:
             for key, name, seen in candidates_sorted:
-                if key and key in h:
+                if not key:
+                    continue
+                # فقط «پیشوند» قبول می‌شه (اسم شخصیت اول هشتگ)، نه هر جای وسط
+                # کلمه — وگرنه «nami» تصادفاً وسط «TsuDynamicShot» پیدا می‌شه
+                # (نمونه‌ی واقعی باگ). اسم‌های خیلی کوتاه (زیر ۴ حرف) فقط با
+                # تطبیق دقیق قبول می‌شن.
+                is_exact = key == h
+                is_prefix = len(key) >= 4 and h.startswith(key)
+                if is_exact or is_prefix:
                     add(name, seen)
                     break
         for ng in ngrams:
@@ -256,13 +314,10 @@ def detect_characters(hashtags: list, ngrams: set, franchise_name: str) -> list:
                     add(name, seen)
                     break
     else:
-        # بدون فرنچایز تأییدشده: فقط تطبیق دقیق، و فقط روی هشتگ (نه متن آزاد).
-        # دلیل محدودکردن به هشتگ: کلمه‌های معمولی مثل «Link» (مثلاً در «Link in
-        # bio») تصادفاً اسم شخصیت (زلدا) هم هستن؛ هشتگ زدن یه تصمیم آگاهانه‌ی
-        # کاربره، ولی کلمه‌ی معمولی وسط جمله نیست. نمونه‌ی KITA همین منطق رو
-        # برای شامل‌بودن نشون داد؛ اینجا همون احتیاط برای متن آزاد هم اعمال می‌شه.
-        for tok in set(hashtags):
-            if tok in GENERIC_HASHTAGS:
+        # بدون فرنچایز تأییدشده: تطبیق دقیق، هم روی هشتگ هم روی n-gram متن
+        # (طبق تصمیم کاربر: هرچی از متن دراومد هم مثل هشتگ حساب می‌شه).
+        for tok in set(hashtags) | ngrams:
+            if tok in GENERIC_HASHTAGS or tok in INSTAGRAM_TREND_HASHTAGS:
                 continue
             opts = _DICT.char_global.get(tok)
             if not opts:
@@ -271,7 +326,7 @@ def detect_characters(hashtags: list, ngrams: set, franchise_name: str) -> list:
             add(name, seen)
 
     ranked = sorted(order, key=lambda n: (-found_seen[n], order.index(n)))
-    return ranked[:MAX_CHARACTER_TAGS]
+    return ranked  # بدون سقف — هرچی با قوانین بالا پیدا بشه، همه برمی‌گرده
 
 
 # ─────────────────────────────────────────
@@ -284,14 +339,10 @@ def detect_descriptive_tags(full_text: str) -> list:
     found = []
     for _key, rule in _RULES.items():
         for pattern in rule.get('patterns', []):
-            # مرز کلمه اجباریه — وگرنه «training» به‌غلط شامل زیررشته‌ی
-            # «raining» تشخیص داده می‌شه (باگ واقعی که تست کرد)
             if re.search(r'\b' + re.escape(pattern) + r'\b', low):
                 found.append(rule.get('tag') or _key)
                 break
-        if len(found) >= MAX_DESCRIPTIVE_TAGS:
-            break
-    return found[:MAX_DESCRIPTIVE_TAGS]
+    return found  # بدون سقف — هرچی دسته‌ی توصیفی تشخیص داده بشه، همه میاد
 
 
 # ─────────────────────────────────────────
@@ -315,8 +366,9 @@ def build_hashtag_caption(original_caption: str):
         ' '.join(HASHTAG_RE.findall(original_caption or ''))
     ])
     descriptive = detect_descriptive_tags(combined_text_for_rules)
+    raw_hashtags = extract_raw_hashtag_names(original_caption)
 
-    if not franchise and not characters and not descriptive:
+    if not franchise and not characters and not descriptive and not raw_hashtags:
         return None, 'هیچ نشونه‌ی مرتبط با انیمه/کاراکتر پیدا نشد — رد شد'
 
     tags = []
@@ -334,12 +386,14 @@ def build_hashtag_caption(original_caption: str):
         push(c)
     for d in descriptive:
         push(d)
+    for r in raw_hashtags:
+        push(r)
 
     if not tags:
         tags = [FALLBACK_TAG]
 
     caption = f"<blockquote>💠 {' '.join('#' + t for t in tags)}</blockquote>"
-    why = f"franchise={franchise!r} characters={characters!r} descriptive={descriptive!r}"
+    why = f"franchise={franchise!r} characters={characters!r} descriptive={descriptive!r} raw_hashtags={raw_hashtags!r}"
     return caption, why
 
 
