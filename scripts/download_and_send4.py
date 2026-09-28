@@ -80,7 +80,8 @@ INSTAGRAM_TREND_HASHTAGS = {
     'tagsforlikes', 'share', 'shoutout', 'repost', 'growmyaccount', 'boostmyaccount',
     'algorithm', 'newpost', 'dailypost', 'contentcreator', 'creatorsoninstagram',
     'artistsoninstagram', 'supportsmallartists', 'smallartist', 'like', 'likes',
-    'comment', 'comments', 'subscribe', 'follownow',
+    'comment', 'comments', 'subscribe', 'follownow','openart','jjk','cozyart','creativeai','aidigitalart','aiartcommunity','aiartgallery','fyppage',
+    'animecommunity','mangaart','viralart','trendingwallpaper','deminiart','digitalanime','animeedit','ai','pageone','aiedit',
 }
 
 HASHTAG_RE = re.compile(r'#(\w+)', re.UNICODE)
