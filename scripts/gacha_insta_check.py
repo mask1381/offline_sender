@@ -235,9 +235,10 @@ def reset_workdir():
     os.makedirs(dsend.WORKDIR, exist_ok=True)
 
 
-def send_post(post: dict, chat_id: str, caption_mode: str) -> bool:
+def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None) -> bool:
     """True = هندل شد (چه بفرسته چه عمداً skip کنه) → state آپدیت بشه.
-    False/exception = شکست واقعی → state آپدیت نشه، دفعه‌ی بعد retry بشه."""
+    False/exception = شکست واقعی → state آپدیت نشه، دفعه‌ی بعد retry بشه.
+    profile: قواعد اختصاصی پیج (dsend.resolve_profile) — None = قواعد سراسری."""
     media_items = post["media_items"]
     caption_raw = post["caption"]
 
@@ -251,7 +252,7 @@ def send_post(post: dict, chat_id: str, caption_mode: str) -> bool:
     if caption_mode == "channel":
         tags = dsend.extract_hashtags(caption_raw)
         duration = dsend.meta_duration(media_items)
-        kind, why = dsend.decide_type(media_items, caption_raw, duration)
+        kind, why = dsend.decide_type(media_items, caption_raw, duration, profile)
         if kind is None:
             print(f'⏭️ {post["shortcode"]}: {why}')
             return True
@@ -280,7 +281,7 @@ def send_post(post: dict, chat_id: str, caption_mode: str) -> bool:
             ds = [dsend.mp4_info(f)["duration"] for f in files if f.lower().endswith(".mp4")]
             ds = [d for d in ds if d]
             duration = max(ds) if ds else None
-            kind, why = dsend.decide_type(media_items, caption_raw, duration)
+            kind, why = dsend.decide_type(media_items, caption_raw, duration, profile)
             print(f"🏷️ نوع={kind} | {why}")
         caption_final = dsend.build_channel_caption(kind, caption_raw, tags, post["url"])
     else:
@@ -317,7 +318,13 @@ def main():
 
     for page in pages:
         username = page["username"]
-        print(f"\n━━━ پیج: {username} ━━━")
+        profile_name = (page.get("profile") or "").strip()
+        print(f"\n━━━ پیج: {username} (profile={profile_name or 'default'}) ━━━")
+        try:
+            profile = dsend.resolve_profile(profile_name)
+        except KeyError as e:
+            print(f"❌ {e} — این پیج رد شد، state دست‌نخورده می‌مونه")
+            continue
         try:
             new_posts = fetch_new_posts(page)
         except Exception as e:
@@ -333,7 +340,7 @@ def main():
 
         for post in new_posts:
             try:
-                ok = send_post(post, args.chat_id, args.caption_mode)
+                ok = send_post(post, args.chat_id, args.caption_mode, profile)
             except FloodWaitError as e:
                 print(f"⏳ FloodWait: {e.seconds} ثانیه — توقف کل ران")
                 if page_advanced:

@@ -156,6 +156,26 @@ GENERIC_TAGS = {
     'characterteaser', 'teaser', 'newcharacter', 'fyp', 'viral', 'reels', 'reel',
 }
 
+# ─────────────────────────────────────────
+# پروفایل پیج (scripts/page_profiles.py) — قواعد اختصاصی هر پیج
+# profile=None یا {} یعنی همین قواعد سراسری بالا، بدون هیچ تغییری.
+# ─────────────────────────────────────────
+try:
+    from page_profiles import PROFILES
+except ImportError:  # فایل نبود → فقط پروفایل پیش‌فرض
+    PROFILES = {'default': {}}
+
+
+def resolve_profile(name):
+    """اسم پروفایل → dict. خالی/None/'default' → {}. اسم ناشناخته → KeyError (تا پیج اشتباهی با قواعد غلط نره)."""
+    name = (name or '').strip()
+    if not name or name == 'default':
+        return dict(PROFILES.get('default', {}))
+    if name not in PROFILES:
+        raise KeyError(f'پروفایل ناشناخته: {name!r} (تعریف‌شده‌ها: {sorted(PROFILES)})')
+    return dict(PROFILES[name])
+
+
 BOLD_ITALIC_MAP = {
     'a': '𝒂', 'b': '𝒃', 'c': '𝒄', 'd': '𝒅', 'e': '𝒆', 'f': '𝒇', 'g': '𝒈', 'h': '𝒉', 'i': '𝒊',
     'j': '𝒋', 'k': '𝒌', 'l': '𝒍', 'm': '𝒎', 'n': '𝒏', 'o': '𝒐', 'p': '𝒑', 'q': '𝒒', 'r': '𝒓',
@@ -200,22 +220,23 @@ def strip_hashtags(text: str) -> str:
     return text.strip()
 
 
-def mentions_character(tags: list) -> bool:
+def mentions_character(tags: list, profile: dict = None) -> bool:
     """اشاره به شخصیت = حداقل یه هشتگ که اسم بازی/شرکت/نوع محتوا نیست."""
+    generic = GENERIC_TAGS | set((profile or {}).get('extra_generic_tags', ()))
     for t in tags:
         norm = re.sub(r'[\W_]+', '', t.lower())
-        if norm and norm not in GENERIC_TAGS:
+        if norm and norm not in generic:
             return True
     return False
 
 
-def classify(duration, tags: list):
+def classify(duration, tags: list, profile: dict = None):
     """None یعنی مدت ویدیو معلوم نیست."""
     if duration is None:
         return None
-    if duration < CLIP_MAX_SECONDS:
+    if duration < (profile or {}).get('clip_max_seconds', CLIP_MAX_SECONDS):
         return 'CLIP'
-    return 'DEMO' if mentions_character(tags) else 'TRAILER'
+    return 'DEMO' if mentions_character(tags, profile) else 'TRAILER'
 
 
 def _first_line(caption: str) -> str:
@@ -223,13 +244,17 @@ def _first_line(caption: str) -> str:
     return body.split('\n')[0].strip() if body else ''
 
 
-def decide_type(media_items: list, caption: str, duration=None):
+def decide_type(media_items: list, caption: str, duration=None, profile: dict = None):
     """تصمیم نوع پست → (kind, why).
     kind: کلید TAXONOMY | 'PENDING' (ویدیو و مدتش هنوز معلوم نیست) | None (ارسال نشه)
-    ترتیب: قواعد متنی (TEXT_RULES) ← اگه ویدیو بود قاعده‌ی مدت (کلیپ/دمو/تریلر) ← UNMATCHED_NON_VIDEO"""
+    ترتیب: قواعد متنی (TEXT_RULES) ← اگه ویدیو بود قاعده‌ی مدت (کلیپ/دمو/تریلر) ← UNMATCHED_NON_VIDEO
+    profile: dict پروفایل پیج (resolve_profile) — None/{} = قواعد سراسری بدون تغییر."""
+    profile = profile or {}
+    rules = list(profile.get('extra_rules', ())) + list(profile.get('text_rules', TEXT_RULES))
+    unmatched = profile['unmatched_non_video'] if 'unmatched_non_video' in profile else UNMATCHED_NON_VIDEO
     has_video = any((i.get('type') or '').lower() == 'video' for i in media_items)
     title = _first_line(caption)
-    for rule in TEXT_RULES:
+    for rule in rules:
         if has_video and not rule['video']:
             continue
         for scope, pattern in rule['patterns']:
@@ -237,16 +262,18 @@ def decide_type(media_items: list, caption: str, duration=None):
             if m:
                 return rule['kind'], f"قاعده‌ی {rule['kind']} ({scope}) روی «{m.group(0)}»"
     if has_video:
+        if profile.get('video_fallback'):
+            return profile['video_fallback'], 'ویدیو — قاعده‌ای نخورد → video_fallback پروفایل'
         if duration is None:
             return 'PENDING', 'ویدیو — مدت هنوز معلوم نیست'
         tags = extract_hashtags(caption)
-        return classify(duration, tags), f'ویدیو {duration:.0f}s | شخصیت={mentions_character(tags)}'
-    if UNMATCHED_NON_VIDEO:
-        return UNMATCHED_NON_VIDEO, 'هیچ قاعده‌ای نخورد → نوع پیش‌فرض'
+        return classify(duration, tags, profile), f'ویدیو {duration:.0f}s | شخصیت={mentions_character(tags, profile)}'
+    if unmatched:
+        return unmatched, 'هیچ قاعده‌ای نخورد → نوع پیش‌فرض'
     return None, 'پست بدون ویدیو و بدون قاعده‌ی متنی'
 
 
-def run_test_file(path: str):
+def run_test_file(path: str, profile: dict = None):
     """--test-file: لیست آیتم‌های n8n ({caption, mediaJson, shortcode}) → نوع و دلیل هر پست."""
     with open(path, encoding='utf-8') as f:
         data = json.load(f)
@@ -256,7 +283,7 @@ def run_test_file(path: str):
         j = it.get('json', it)
         media = j.get('media') or json.loads(j.get('mediaJson') or '[]')
         cap = j.get('caption', '')
-        kind, why = decide_type(media, cap, meta_duration(media))
+        kind, why = decide_type(media, cap, meta_duration(media), profile)
         print(f"{str(j.get('shortcode', '?')):<13} {str(kind):<9} {why} | «{_first_line(cap)[:50]}»")
 
 
@@ -948,12 +975,20 @@ def main():
                          help="raw = کپشن دست‌نخورده (پیش‌فرض) | channel = نوع (کلیپ/دمو/تریلر) + قالب کانال")
     parser.add_argument('--test-file', default='',
                          help='JSON لیست آیتم‌های n8n ({caption, mediaJson}) — فقط نوع/دلیل هر پست چاپ می‌شه')
+    parser.add_argument('--profile', default='',
+                         help='اسم پروفایل پیج از scripts/page_profiles.py (خالی = قواعد سراسری) — برای تست/ارسال دستی')
     parser.add_argument('--dry-run', action='store_true',
                          help='فقط نوع و کپشن رو چاپ کن؛ نه دانلود، نه ارسال (برای تست قواعد)')
     args = parser.parse_args()
 
+    try:
+        profile = resolve_profile(args.profile)
+    except KeyError as e:
+        print(f'❌ {e}')
+        sys.exit(1)
+
     if args.test_file:
-        run_test_file(args.test_file)
+        run_test_file(args.test_file, profile)
         return
 
     chat_id = args.chat_id.strip()
@@ -985,7 +1020,7 @@ def main():
             if channel_mode:
                 tags = extract_hashtags(args.caption)
                 duration = meta_duration(media_items)
-                kind, why = decide_type(media_items, args.caption, duration)
+                kind, why = decide_type(media_items, args.caption, duration, profile)
                 if kind is None:
                     print(f'⏭️ ارسال نمی‌شه — {why}')
                     return
@@ -1014,7 +1049,7 @@ def main():
                     if duration is None:
                         print('❌ مدت ویدیو مشخص نشد (نه از Apify، نه از خود فایل)')
                         sys.exit(1)
-                    kind, why = decide_type(media_items, args.caption, duration)
+                    kind, why = decide_type(media_items, args.caption, duration, profile)
                     print(f'🏷️ نوع={kind} | {why}')
                 caption_override = build_channel_caption(kind, args.caption, tags, args.url.strip())
 
