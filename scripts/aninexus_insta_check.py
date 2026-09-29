@@ -21,6 +21,13 @@ aninexus_insta_check.py — چک شبانه‌ی پیج‌های اینستاگ�
     منطق قبلی (dsend4.build_hashtag_caption) + فوتر THE LABS. اگه هشتگی تشخیص
     داده نشد، #AnimeArt.
 
+پروفایل پیج‌ها (scripts/page_profiles.py):
+  هر پیج توی aninexus_pages.json می‌تونه کلید "profile" داشته باشه. پیج بدون پروفایل
+  (یا "default") دقیقاً مثل قبل کپشن هشتگی می‌گیره. پروفایل ناشناخته = پیج رد می‌شه و
+  state دست‌نخورده می‌مونه. کلیدهای پیاده‌شده اینجا: drop_first/drop_last/drop_min_items،
+  keep_lines، strip_blocks، split_title، own_hashtags، raw_caption، drop_text،
+  blocked_hashtags، extra_hashtags، fixed_caption، continuation_caption.
+
 هیچ منطق دانلود/ورد نویسی از صفر نیست: از download_and_send3.py (دانلود،
 entity resolution) و download_and_send4.py (کپشن هشتگی + ارسال زمان‌دار)
 import می‌شه.
@@ -232,7 +239,8 @@ def build_full_caption(original_caption: str, hashtag_html: str) -> str:
     return f"<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n{tail}"
 
 
-async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video_meta=None):
+async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video_meta=None,
+                         continuation_caption=None):
     """ارسال زمان‌بندی‌شده‌ی عکس/ویدیو (تکی یا آلبوم، هر آلبوم حداکثر ۱۰ تا)."""
     from telethon import TelegramClient
     from telethon.sessions import StringSession
@@ -270,7 +278,7 @@ async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video
                 chunk = files[i:i + 10]
                 sent = await client.send_file(
                     chat_value, chunk,
-                    caption=caption if i == 0 else "",
+                    caption=caption if i == 0 else (continuation_caption or ""),
                     parse_mode="html", supports_streaming=True, schedule=schedule_dt,
                 )
                 sent_all.extend(sent if isinstance(sent, list) else [sent])
@@ -282,13 +290,122 @@ async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video
 # ─────────────────────────────────────────
 # مرحله‌ی ۱: جمع‌آوری همه‌ی پست‌های قابل‌ارسالِ همه‌ی پیج‌ها
 # ─────────────────────────────────────────
+# ─────────────────────────────────────────
+# کپشن بر اساس پروفایل پیج
+# ─────────────────────────────────────────
+PROFILE_CAPTION_KEYS = ("keep_lines", "own_hashtags", "raw_caption", "drop_text", "fixed_caption")
+
+
+def uses_profile_caption(profile: dict) -> bool:
+    """True = این پیج کپشن اختصاصی داره؛ False = همون کپشن هشتگیِ قبلی."""
+    return any(profile.get(k) for k in PROFILE_CAPTION_KEYS)
+
+
+def _hashtag_block(tags: list) -> str:
+    return f"<blockquote>💠 {' '.join(tags)}</blockquote>" if tags else ""
+
+
+def _own_hashtags(caption: str, profile: dict) -> list:
+    """هشتگ‌های خود پیج (از هر جای کپشن، بدون تکرار) − blocked + extra."""
+    blocked = {str(b).lstrip("#").lower() for b in (profile.get("blocked_hashtags") or ())}
+    out, seen = [], set()
+    for h in dsend3.extract_hashtags(caption):
+        key = h.lstrip("#").lower()
+        if key and key not in blocked and key not in seen:
+            seen.add(key)
+            out.append("#" + h.lstrip("#"))
+    for h in (profile.get("extra_hashtags") or ()):
+        key = str(h).lstrip("#").lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append("#" + str(h).lstrip("#"))
+    return out
+
+
+def _clean_raw(caption: str) -> str:
+    """raw_caption: فقط توکن‌های هشتگ برداشته می‌شن (چون جدا می‌رن)، بقیه‌ی متن دست‌نخورده."""
+    t = dsend3.HASHTAG_RE.sub("", caption or "")
+    t = re.sub(r"[ \t]+\n", "\n", t)
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
+def _keep_lines(text: str, patterns) -> str:
+    regs = [re.compile(p, re.I) for p in patterns]
+    return "\n".join(ln.strip() for ln in (text or "").splitlines() if any(r.search(ln) for r in regs))
+
+
+def _compose_caption(title: str, body: str, tags: list) -> str:
+    """[عنوان bold] + [blockquote متن] + [blockquote هشتگ] + فوتر، با سقف ۱۰۲۴."""
+    title_part = f"<b>{html.escape(title, quote=False)}</b>\n\n" if title else ""
+
+    def tail(tg):
+        blk = _hashtag_block(tg)
+        return (blk + "\n\n" if blk else "") + FOOTER_HTML
+
+    # هشتگ‌ها اون‌قدر زیاد بودن که جا برای متن نمونده → از آخر کم می‌شن
+    need = 100 if body else 0
+    while tags and (CAPTION_LIMIT - _visible_len(title_part + tail(tags)) - 12) < need:
+        tags = tags[:-1]
+
+    body_part = ""
+    if body:
+        budget = CAPTION_LIMIT - _visible_len(title_part + tail(tags)) - 2 - 10
+        body = _truncate_text(body, max(budget, 50))
+        body_part = f"<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n"
+    return title_part + body_part + tail(tags)
+
+
+def build_profile_caption(caption_raw: str, profile: dict):
+    """خروجی: (کپشن اول HTML, کپشن آلبوم‌های بعدی یا None, دلیل برای لاگ)."""
+    caption_raw = caption_raw or ""
+    raw_mode = bool(profile.get("raw_caption"))
+    title = body = ""
+    tags = []
+    fixed = (profile.get("fixed_caption") or "").strip()
+
+    if profile.get("drop_text"):
+        pass
+    elif fixed:
+        toks = fixed.split()
+        if toks and all(t.startswith("#") for t in toks):
+            tags = toks
+        else:
+            body = fixed
+    elif raw_mode:
+        body = _clean_raw(caption_raw)
+    else:
+        text = dsend3.strip_caption_blocks(caption_raw, profile.get("strip_blocks"))
+        if profile.get("keep_lines"):
+            text = _keep_lines(text, profile["keep_lines"])
+        body = dsend3.strip_hashtags(text)
+        if body and profile.get("split_title", True):
+            title, body = dsend3.split_title(body)
+
+    if profile.get("own_hashtags") or raw_mode:
+        tags = _own_hashtags(caption_raw, profile)
+
+    cont = (profile.get("continuation_caption") or "").strip()
+    continuation = html.escape(cont, quote=False) if cont else None
+    why = (f"پروفایل: عنوان={'✓' if title else '✗'} متن={'✓' if body else '✗'} "
+           f"هشتگ={len(tags)}{' | کپشن ادامه ✓' if continuation else ''}")
+    return _compose_caption(title, body, tags), continuation, why
+
+
 def collect_sendable_posts(pages: list) -> list:
     """خروجی: لیستی از {"page": page_dict, "post": post_dict, "caption": html}
     همه‌ی پست‌های دارای رسانه (عکس یا ویدیو)."""
     to_send = []
     for page in pages:
         username = page["username"]
-        print(f"\n━━━ چک پیج: {username} ━━━")
+        profile_name = (page.get("profile") or "").strip()
+        print(f"\n━━━ چک پیج: {username} (profile={profile_name or 'default'}) ━━━")
+        try:
+            profile = dsend3.resolve_profile(profile_name)
+        except KeyError as e:
+            print(f"❌ {e} — پیج رد شد، state دست‌نخورده می‌مونه")
+            continue
         try:
             new_posts = fetch_new_posts(page)
         except Exception as e:
@@ -302,7 +419,8 @@ def collect_sendable_posts(pages: list) -> list:
         print(f"📬 {len(new_posts)} پست جدید")
         for post in new_posts:
             shortcode = post["shortcode"]
-            media_items = post["media_items"]
+            media_items = dsend3.apply_media_drops(post["media_items"], profile)   # drop_first/drop_last
+            post["media_items"] = media_items
 
             if not media_items:
                 print(f'⏭️ {shortcode}: بدون رسانه — رد شد (ولی state جلو می‌ره)')
@@ -310,15 +428,18 @@ def collect_sendable_posts(pages: list) -> list:
                 page["last_post_taken_at"] = post["takenAt"]
                 continue
 
-            hashtag_html, why = dsend4.build_hashtag_caption(post["caption"])
-            if hashtag_html is None:
-                hashtag_html = f"<blockquote>💠 #{dsend4.FALLBACK_TAG}</blockquote>"
-                why = f"هشتگ مرتبطی پیدا نشد — فالبک #{dsend4.FALLBACK_TAG}"
-
-            caption = build_full_caption(post["caption"], hashtag_html)
+            continuation = None
+            if uses_profile_caption(profile):
+                caption, continuation, why = build_profile_caption(post["caption"], profile)
+            else:
+                hashtag_html, why = dsend4.build_hashtag_caption(post["caption"])
+                if hashtag_html is None:
+                    hashtag_html = f"<blockquote>💠 #{dsend4.FALLBACK_TAG}</blockquote>"
+                    why = f"هشتگ مرتبطی پیدا نشد — فالبک #{dsend4.FALLBACK_TAG}"
+                caption = build_full_caption(post["caption"], hashtag_html)
             kinds = ",".join(sorted({(i.get("type") or "").lower() for i in media_items}))
             print(f'🏷️ {shortcode} [{kinds}]: {why}')
-            to_send.append({"page": page, "post": post, "caption": caption})
+            to_send.append({"page": page, "post": post, "caption": caption, "continuation": continuation})
 
     return to_send
 
@@ -351,7 +472,8 @@ def schedule_all(to_send: list, chat_id: str):
                 first_video = next((i for i in post["media_items"] if (i.get("type") or "").lower() == "video"), {})
                 video_meta = {"duration": first_video.get("duration")}
             sent = asyncio.run(
-                send_scheduled(files, item["caption"], chat_id, when, thumb=thumb, video_meta=video_meta)
+                send_scheduled(files, item["caption"], chat_id, when, thumb=thumb, video_meta=video_meta,
+                               continuation_caption=item.get("continuation"))
             )
             ids = ", ".join(str(s.id) for s in sent)
             print(f"✅ {shortcode} زمان‌بندی شد برای {when.strftime('%Y-%m-%d %H:%M UTC')} "
