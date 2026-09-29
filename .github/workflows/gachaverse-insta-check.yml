@@ -40,7 +40,7 @@ jobs:
           TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PROXY_URL: ${{ secrets.IG_PROXY_URL }}
-          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN3 }}
           INPUT_PAGES_FILE: ${{ inputs.pages_file }}
           INPUT_CHAT_ID: ${{ inputs.chat_id }}
         run: |
