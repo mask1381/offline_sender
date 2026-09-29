@@ -29,7 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 from telethon.errors import FloodWaitError
@@ -40,6 +40,22 @@ from telethon.errors import FloodWaitError
 # ─────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import download_and_send3 as dsend  # noqa: E402
+
+# حداقل فاصله‌ی بین دو پست زمان‌بندی‌شده‌ی پشت‌سرهم در یک اجرا (چه از یک پیج چه از پیج‌های مختلف)؛
+# تا آلبوم‌ها توی کانال با هم قاطی نشن.
+SCHEDULE_MIN_GAP_MIN = 3
+_last_schedule = None
+
+
+def spaced_schedule(dt):
+    """dt (یا None = فوری) رو طوری جابه‌جا می‌کنه که از آخرین زمان‌بندی این اجرا حداقل SCHEDULE_MIN_GAP_MIN دیرتر باشه."""
+    global _last_schedule
+    if dt is None:
+        return None
+    if _last_schedule is not None and dt < _last_schedule + timedelta(minutes=SCHEDULE_MIN_GAP_MIN):
+        dt = _last_schedule + timedelta(minutes=SCHEDULE_MIN_GAP_MIN)
+    _last_schedule = dt
+    return dt
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
@@ -286,9 +302,10 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
         thumb = dsend.prepare_thumb(media_items, files)
         # اگه fallback جایگزین شد، متادیتای duration/w/h اپیفای دیگه معتبر نیست؛
         # video_attributes خودش از خود فایل mp4 مقدار واقعی رو می‌خونه
-        video_meta = None if replaced else next(
-            (i for i in media_items if (i.get("type") or "").lower() == "video"), None
-        )
+        # لیست به ترتیب ویدیوها (برای آلبوم چندویدیویی)؛ v3 فقط وقتی تعدادش با فایل‌ها بخونه ازش استفاده می‌کنه
+        video_meta = None if replaced else [
+            i for i in media_items if (i.get("type") or "").lower() == "video"
+        ]
 
     if caption_mode == "channel":
         if kind == "PENDING":
@@ -301,7 +318,7 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
     else:
         caption_final = dsend.build_caption(caption_raw)
 
-    schedule_dt = dsend.compute_schedule_dt(profile)
+    schedule_dt = spaced_schedule(dsend.compute_schedule_dt(profile))
     sent = asyncio.run(
         dsend.send_items_to_telegram(files, caption_final, chat_id, thumb, video_meta, schedule_dt)
     )

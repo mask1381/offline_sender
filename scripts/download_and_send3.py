@@ -248,6 +248,75 @@ def strip_caption_blocks(caption: str, patterns) -> str:
     return '\n\n'.join(kept)
 
 
+_V4 = None
+
+
+def _load_v4():
+    """download_and_send4.py (دیکشنری شخصیت‌ها + detect_characters) رو تنبل بارگذاری می‌کنه.
+    نشد → None (پروفایل بدون هشتگ شخصیت ادامه می‌ده، خطا نمی‌ده)."""
+    global _V4
+    if _V4 is None:
+        try:
+            import importlib.util
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'download_and_send4.py')
+            spec = importlib.util.spec_from_file_location('download_and_send4', path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _V4 = mod
+        except Exception as e:
+            print(f'⚠️ بارگذاری download_and_send4 (دیکشنری شخصیت‌ها) نشد: {type(e).__name__}: {e}')
+            _V4 = False
+    return _V4 or None
+
+
+# کلمات عمومی که نباید به‌تنهایی «اسم شخصیت» حساب بشن (وقتی فقط یک کلمه از اسم چندکلمه‌ای مثل
+# «Exalted Master of the Heretical Path» توی متن پیدا شده)
+COMMON_WORDS = {
+    'the', 'and', 'for', 'with', 'from', 'his', 'her', 'its', 'are', 'not', 'new', 'one', 'two', 'can',
+    'may', 'has', 'had', 'was', 'all', 'any', 'via', 'max', 'now', 'out', 'off', 'per', 'only', 'more',
+    'path', 'master', 'mode', 'hero', 'lord', 'king', 'queen', 'blade', 'light', 'dark', 'fire', 'water',
+    'ice', 'wind', 'star', 'moon', 'sun', 'sword', 'skill', 'burst', 'team', 'info', 'leak', 'leaks',
+}
+
+
+def character_hashtags(text: str, franchise: str, limit: int = 6) -> list:
+    """اسم شخصیت‌های فرنچایز داخل متن → ['#Mitya', '#Valeriy']، به ترتیب اولین ظهور در متن.
+    اسم چندکلمه‌ای فقط وقتی قبول می‌شه که کل اسم توی متن باشه، یا یکی از کلماتش که «عمومی» نیست
+    با حرف اول بزرگ (یا ALL CAPS) نوشته شده باشه — تا «the» یه هشتگ اشتباه نسازه."""
+    v4 = _load_v4()
+    if not v4 or not franchise or not (text or '').strip():
+        return []
+    cleaned = v4.clean_text(text)
+    try:
+        ngrams = v4.text_ngrams(cleaned)
+        names = v4.detect_characters([], ngrams, franchise)
+    except Exception as e:
+        print(f'⚠️ تشخیص شخصیت شکست خورد: {e}')
+        return []
+    low = cleaned.lower()
+    cap_tokens = {t.lower() for t in re.findall(r"[^\W\d_]+", cleaned) if t[:1].isupper()}
+
+    def valid(name):
+        words = [w for w in name.lower().split() if w]
+        if len(words) <= 1:
+            return True
+        if v4.compact(name) in ngrams:
+            return True
+        return any(w in cap_tokens and w not in COMMON_WORDS and len(w) >= 3 for w in words)
+
+    def first_pos(name):
+        ps = [low.find(w) for w in name.lower().split() if len(w) >= 3 and w in low]
+        return min(ps) if ps else 10 ** 6
+
+    out, seen = [], set()
+    for name in sorted((n for n in names if valid(n)), key=first_pos):
+        tag = '#' + v4.to_hashtag(name)
+        if tag.lower() not in seen:
+            seen.add(tag.lower())
+            out.append(tag)
+    return out[:limit]
+
+
 BOLD_ITALIC_MAP = {
     'a': '𝒂', 'b': '𝒃', 'c': '𝒄', 'd': '𝒅', 'e': '𝒆', 'f': '𝒇', 'g': '𝒈', 'h': '𝒉', 'i': '𝒊',
     'j': '𝒋', 'k': '𝒌', 'l': '𝒍', 'm': '𝒎', 'n': '𝒏', 'o': '𝒐', 'p': '𝒑', 'q': '𝒒', 'r': '𝒓',
@@ -562,6 +631,13 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
         title, body = split_title(body)
     else:
         title = ''
+    # protect_blocks: پاراگراف‌هایی مثل «Via X» که هنگام کوتاه‌سازی نباید حذف بشن
+    protected = ''
+    if body and profile.get('protect_blocks'):
+        pregs = [re.compile(p, re.I | re.M) for p in profile['protect_blocks']]
+        paras = re.split(r'\n[ \t]*\n', body)
+        protected = '\n\n'.join(x for x in paras if any(r.search(x) for r in pregs))
+        body = '\n\n'.join(x for x in paras if not any(r.search(x) for r in pregs))
     # bi اول، escape بعد (وگرنه &amp; هم bold-italic می‌شد و خراب می‌شد)
     title_part = f'<b>{html.escape(bi(title), quote=False)}</b>\n\n' if title else ''
 
@@ -572,6 +648,15 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
     for redundant, covering in (profile.get('redundant_tags') or {}).items():
         if covering.lower() in present:
             extra = [h for h in extra if h.lstrip('#').lower() != redundant.lower()]
+
+    # character_tags: 'Genshin Impact' → اسم شخصیت‌های متن (بدون پاراگراف‌های محافظت‌شده مثل Via) هشتگ می‌شن
+    if profile.get('character_tags'):
+        chars_src = '\n\n'.join(x for x in (title, body) if x)
+        have = {h.lstrip('#').lower() for h in extra} | {type_tag.lstrip('#').lower()}
+        for h in character_hashtags(chars_src, profile['character_tags']):
+            if h.lstrip('#').lower() not in have:
+                extra.append(h)
+                have.add(h.lstrip('#').lower())
 
     def tag_line(ex):
         return ' '.join([type_tag] + ex) + '\n\n'
@@ -585,7 +670,15 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
     while budget_for(extra) < 100 and extra:
         extra.pop()
 
-    body = _truncate_paragraphs(body, max(50, budget_for(extra))) if body else ''
+    if protected:
+        # بقیه‌ی متن کوتاه می‌شه، بلوک محافظت‌شده (مثلاً Via X) همیشه آخر می‌مونه
+        room = max(50, budget_for(extra) - _u16len(protected) - 2)
+        cut = _truncate_paragraphs(body, room) if body else ''
+        if body and cut != body:
+            cut = cut.rstrip() + '\n…'
+        body = '\n\n'.join(x for x in (cut, protected) if x)
+    else:
+        body = _truncate_paragraphs(body, max(50, budget_for(extra))) if body else ''
 
     caption = title_part
     if body:
@@ -981,6 +1074,51 @@ def download_reddit(url: str):
 # ─────────────────────────────────────────
 # ارسال به تلگرام با Telethon (اکانت شخصی)
 # ─────────────────────────────────────────
+async def _send_album_with_video_attrs(client, chat_entity, chunk, caption, schedule, thumb_by_path, meta_by_path):
+    """آلبومی که ویدیو داره: Telethon برای آلبوم attributes قبول نمی‌کنه (ویدیو ۰۰:۰۰/جعبه‌ی سیاه می‌شه)،
+    پس هر فایل رو خودمون آپلود می‌کنیم و با SendMultiMedia می‌فرستیم؛ ویدیوها مدت/ابعاد/کاور واقعی می‌گیرن."""
+    import random
+    from telethon import utils as tl_utils
+    from telethon.tl import types, functions
+
+    peer = chat_entity
+    parse = _ExpandableHTML.parse if '<blockquote expandable>' in (caption or '') else tl_html.parse
+    text, entities = parse(caption or '')
+    multi = []
+    for i, f in enumerate(chunk):
+        fh = await _client_upload(client, f)
+        if f.lower().endswith('.mp4'):
+            attrs = [DocumentAttributeFilename(os.path.basename(f))]
+            tpath = thumb_by_path.get(f)
+            vattr = video_attributes(f, meta_by_path.get(f), tpath)
+            if vattr:
+                attrs.append(vattr)
+            th = await _client_upload(client, tpath) if tpath else None
+            media = types.InputMediaUploadedDocument(file=fh, mime_type='video/mp4', attributes=attrs, thumb=th)
+        else:
+            media = types.InputMediaUploadedPhoto(file=fh)
+        uploaded = await client(functions.messages.UploadMediaRequest(peer=peer, media=media))
+        multi.append(types.InputSingleMedia(
+            media=tl_utils.get_input_media(uploaded),
+            message=text if i == 0 else '',
+            entities=entities if i == 0 else None,
+            random_id=random.randrange(-2 ** 63, 2 ** 63),
+        ))
+    result = await client(functions.messages.SendMultiMediaRequest(
+        peer=peer, multi_media=multi, schedule_date=schedule))
+    msgs = []
+    for u in getattr(result, 'updates', None) or []:
+        m = getattr(u, 'message', None)
+        if m is not None and isinstance(u, (types.UpdateNewMessage, types.UpdateNewChannelMessage,
+                                            types.UpdateNewScheduledMessage)):
+            msgs.append(m)
+    return msgs
+
+
+async def _client_upload(client, path):
+    return await client.upload_file(path)
+
+
 async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta=None, schedule=None):
     client = TelegramClient(StringSession(TG_SESSION_STRING), int(TG_API_ID), TG_API_HASH)
     await client.connect()
@@ -1003,6 +1141,15 @@ async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta
             # آلبوم گروهی — کپشن فقط رو فایل اول هر آلبوم می‌شینه (محدودیت تلگرام).
             # بیش از ۱۰ فایل → چند آلبوم هم‌اندازه و ترتیب‌دار، هر کدوم با کپشن کامل.
             chunks = balanced_chunks(files, MAX_ALBUM_SIZE)
+            # متادیتا/کاور ویدیوها بر اساس مسیر فایل (video_meta: dict = فقط ویدیوی اول | list = به ترتیب ویدیوها)
+            vids_all = [x for x in files if x.lower().endswith('.mp4')]
+            if isinstance(video_meta, (list, tuple)) and len(video_meta) == len(vids_all):
+                meta_by_path = dict(zip(vids_all, video_meta))
+            elif isinstance(video_meta, dict) and vids_all:
+                meta_by_path = {vids_all[0]: video_meta}
+            else:
+                meta_by_path = {}
+            thumb_by_path = {vids_all[0]: thumb} if (thumb and vids_all) else {}
             if len(chunks) > 1:
                 print(f'📚 {len(files)} فایل → {len(chunks)} آلبوم: {[len(c) for c in chunks]}')
             for idx, chunk in enumerate(chunks):
@@ -1011,14 +1158,25 @@ async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta
                     # چند ثانیه فاصله تا ترتیب آلبوم‌ها توی کانال حفظ بشه
                     from datetime import timedelta
                     when = schedule + timedelta(seconds=10 * idx)
-                sent = await client.send_file(
-                    chat_id_value,
-                    chunk,
-                    caption=caption,
-                    parse_mode=pick_parse_mode(caption),
-                    supports_streaming=True,
-                    schedule=when,
-                )
+                sent = None
+                if any(x.lower().endswith('.mp4') for x in chunk):
+                    try:
+                        sent = await _send_album_with_video_attrs(
+                            client, chat_id_value, chunk, caption, when, thumb_by_path, meta_by_path)
+                    except FloodWaitError:
+                        raise
+                    except Exception as e:
+                        print(f'⚠️ آلبوم با attribute ویدیو نشد ({type(e).__name__}: {e}) — fallback به آلبوم ساده')
+                        sent = None
+                if not sent:
+                    sent = await client.send_file(
+                        chat_id_value,
+                        chunk,
+                        caption=caption,
+                        parse_mode=pick_parse_mode(caption),
+                        supports_streaming=True,
+                        schedule=when,
+                    )
                 if isinstance(sent, list):
                     sent_messages.extend(sent)
                 else:
@@ -1030,6 +1188,8 @@ async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta
                 extra = {}
                 if f.lower().endswith('.mp4'):
                     meta = video_meta if len(files) == 1 else None
+                    if isinstance(meta, (list, tuple)):
+                        meta = meta[0] if meta else None
                     vattr = video_attributes(f, meta, thumb)
                     finfo = mp4_info(f)
                     print(f"🎞️ فایل: codec={finfo['codecs']} fragmented={finfo['fragmented']} "
