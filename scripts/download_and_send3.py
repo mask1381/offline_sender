@@ -502,6 +502,23 @@ def prepare_thumb(media_items: list, files: list):
     return None
 
 
+MAX_ALBUM_SIZE = 10  # سقف تلگرام برای هر آلبوم
+
+
+def balanced_chunks(items: list, size: int = MAX_ALBUM_SIZE) -> list:
+    """تقسیم ترتیب‌دار به کمترین تعداد تکه‌ی تقریباً هم‌اندازه (هیچ‌وقت تکه‌ی تک‌آیتمی نمی‌سازه).
+    مثلاً ۱۱ → ۶+۵ ، ۲۰ → ۱۰+۱۰ ، ۲۳ → ۸+۸+۷ ، ۷ → ۷."""
+    n = len(items)
+    k = max(1, -(-n // size))
+    base, rem = divmod(n, k)
+    out, i = [], 0
+    for j in range(k):
+        step = base + (1 if j < rem else 0)
+        out.append(items[i:i + step])
+        i += step
+    return out
+
+
 def _u16len(s: str) -> int:
     return len(s.encode('utf-16-le')) // 2
 
@@ -982,22 +999,32 @@ async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta
         def is_media(fp):
             return fp.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4'))
 
-        if len(files) > 1 and all(is_media(p) for p in files) and len(files) <= 10:
-            # آلبوم گروهی — کپشن فقط رو فایل اول اعمال می‌شه (محدودیت تلگرام)
-            sent = await client.send_file(
-                chat_id_value,
-                files,
-                caption=caption,
-                parse_mode=pick_parse_mode(caption),
-                supports_streaming=True,
-                schedule=schedule,
-            )
-            if isinstance(sent, list):
-                sent_messages.extend(sent)
-            else:
-                sent_messages.append(sent)
+        if len(files) > 1 and all(is_media(p) for p in files):
+            # آلبوم گروهی — کپشن فقط رو فایل اول هر آلبوم می‌شینه (محدودیت تلگرام).
+            # بیش از ۱۰ فایل → چند آلبوم هم‌اندازه و ترتیب‌دار، هر کدوم با کپشن کامل.
+            chunks = balanced_chunks(files, MAX_ALBUM_SIZE)
+            if len(chunks) > 1:
+                print(f'📚 {len(files)} فایل → {len(chunks)} آلبوم: {[len(c) for c in chunks]}')
+            for idx, chunk in enumerate(chunks):
+                when = schedule
+                if schedule is not None and idx:
+                    # چند ثانیه فاصله تا ترتیب آلبوم‌ها توی کانال حفظ بشه
+                    from datetime import timedelta
+                    when = schedule + timedelta(seconds=10 * idx)
+                sent = await client.send_file(
+                    chat_id_value,
+                    chunk,
+                    caption=caption,
+                    parse_mode=pick_parse_mode(caption),
+                    supports_streaming=True,
+                    schedule=when,
+                )
+                if isinstance(sent, list):
+                    sent_messages.extend(sent)
+                else:
+                    sent_messages.append(sent)
         else:
-            # fallback: تک‌تک (برای فایل غیرمدیا یا بیش از ۱۰ فایل)
+            # fallback: تک‌تک (برای فایل تکی یا وقتی فایل غیرمدیا داریم)
             for f in files:
                 attributes = [DocumentAttributeFilename(os.path.basename(f))]
                 extra = {}
