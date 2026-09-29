@@ -18,7 +18,8 @@ aninexus_insta_check.py — چک شبانه‌ی پیج‌های اینستاگ�
   - هیچ پستی به‌خاطر نوع (عکس/ویدیو) یا نبودن هشتگ مرتبط رد نمی‌شه — فقط پست
     بدون رسانه (که چیزی برای ارسال نداره) رد می‌شه.
   - کپشن نهایی = کپشن اینستاگرام (داخل blockquote بازشونده) + بلوک هشتگِ همون
-    منطق قبلی (dsend4.build_hashtag_caption). اگه هشتگی تشخیص داده نشد، #AnimeArt.
+    منطق قبلی (dsend4.build_hashtag_caption) + فوتر THE LABS. اگه هشتگی تشخیص
+    داده نشد، #AnimeArt.
 
 هیچ منطق دانلود/ورد نویسی از صفر نیست: از download_and_send3.py (دانلود،
 entity resolution) و download_and_send4.py (کپشن هشتگی + ارسال زمان‌دار)
@@ -207,16 +208,28 @@ def _truncate_text(text: str, max_len: int) -> str:
     return cut.rstrip() + "…"
 
 
+FOOTER_HTML = (
+    "𝗧𝗛𝗘 𝗟𝗔𝗕𝗦 ▸\n"
+    '├─ 🎴 <a href="https://t.me/+unWp5PLLPj4zYTQ0">𝑨𝒏𝒊𝑾𝒂𝒍𝒍 𝑳𝒂𝒃</a>\n'
+    '├─ 🪽 <a href="https://t.me/+51II96IApZY5ZThk">𝑾𝒂𝒊𝒇𝒖 𝑳𝒂𝒃</a>\n'
+    '└─ 🌌 <a href="https://t.me/AniNexus_Lab">𝑨𝒏𝒊𝑵𝒆𝒙𝒖𝒔 𝑳𝒂𝒃</a>'
+)
+
+
+def _visible_len(html_text: str) -> int:
+    return _u16len(html.unescape(re.sub(r"<[^>]+>", "", html_text)))
+
+
 def build_full_caption(original_caption: str, hashtag_html: str) -> str:
-    """کپشن اینستا (بازشونده) + بلوک هشتگ، با رعایت سقف ۱۰۲۴ کاراکتر تلگرام."""
+    """کپشن اینستا (بازشونده) + بلوک هشتگ + فوتر، با رعایت سقف ۱۰۲۴ کاراکتر تلگرام."""
+    tail = f"{hashtag_html}\n\n{FOOTER_HTML}"
     body = re.sub(r"\n{3,}", "\n\n", (original_caption or "").strip())
     if not body:
-        return hashtag_html
+        return tail
 
-    visible_tags = _u16len(html.unescape(re.sub(r"<[^>]+>", "", hashtag_html)))
-    budget = CAPTION_LIMIT - visible_tags - 2 - 10   # 2 = دو خط جدا، 10 = حاشیه‌ی امن
+    budget = CAPTION_LIMIT - _visible_len(tail) - 2 - 10   # 2 = دو خط جدا، 10 = حاشیه‌ی امن
     body = _truncate_text(body, max(budget, 50))
-    return f"<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n{hashtag_html}"
+    return f"<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n{tail}"
 
 
 async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video_meta=None):
