@@ -408,11 +408,10 @@ def _load_dsend3():
 
 async def send_photo_album_scheduled(files, caption, chat_id, schedule_dt=None):
     """ارسال آلبوم عکس با قابلیت زمان‌بندی تلگرام (schedule=<datetime>).
-    عمداً از send3.send_items_to_telegram جدا نوشته شده (نه import مستقیم و
-    نه ویرایش خودِ send3.py که فایل عملیاتی مشترکه): چون این مسیر همیشه فقط
-    عکسه (ویدیو قبلاً رد شده)، نیازی به منطق ویدیو/thumb ندارد و ساده‌تره.
-    بخش «resolve کردن chat_id» عیناً از send3 کپی شده چون همون باگ سشن تازه
-    (نمی‌تونه کانال رو با آی‌دی خام پیدا کنه) اینجا هم صادقه."""
+    اگه بیش از ۱۰ عکس باشه، مثل send3 به آلبوم‌های هم‌اندازه تقسیم می‌شه
+    (مثلاً ۱۵ → ۸+۷)، کپشن روی هر آلبوم می‌شینه و زمان هر آلبوم ۱۰ ثانیه
+    بعد از قبلی زمان‌بندی می‌شه تا ترتیب توی کانال حفظ بشه."""
+    from datetime import timedelta
     from telethon import TelegramClient
     from telethon.sessions import StringSession
 
@@ -427,15 +426,28 @@ async def send_photo_album_scheduled(files, caption, chat_id, schedule_dt=None):
             await client.get_dialogs()
             chat_id_value = await client.get_input_entity(chat_id_value)
 
-        sent = await client.send_file(
-            chat_id_value,
-            files,
-            caption=caption,
-            parse_mode='html',
-            supports_streaming=True,
-            schedule=schedule_dt,
-        )
-        return sent if isinstance(sent, list) else [sent]
+        chunks = dsend3.balanced_chunks(files, dsend3.MAX_ALBUM_SIZE)
+        if len(chunks) > 1:
+            print(f'📚 {len(files)} فایل → {len(chunks)} آلبوم: {[len(c) for c in chunks]}')
+
+        sent_messages = []
+        for idx, chunk in enumerate(chunks):
+            when = schedule_dt
+            if schedule_dt is not None and idx:
+                when = schedule_dt + timedelta(seconds=10 * idx)
+            sent = await client.send_file(
+                chat_id_value,
+                chunk if len(chunk) > 1 else chunk[0],
+                caption=caption,
+                parse_mode='html',
+                supports_streaming=True,
+                schedule=when,
+            )
+            if isinstance(sent, list):
+                sent_messages.extend(sent)
+            else:
+                sent_messages.append(sent)
+        return sent_messages
     finally:
         await client.disconnect()
 
