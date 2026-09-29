@@ -65,4 +65,54 @@ PROFILES = {
             r'^[^\w\n]*hashtags?[^\w\n]*$',       # ✦ Hashtags (تیتر؛ خود هشتگ‌ها جدا استخراج می‌شن)
         ],
     },
+
+    # ───────── پیج‌های ANINEXUS (aninexus_pages.json) ─────────
+    # فعلاً خالی = رفتار سراسری؛ قواعد هر پیج بعد از تعیین اینجا پر می‌شه.
+    # hanbil_project — فقط سه خط Song / Artist / Anime نگه داشته می‌شه (تبلیغ «Want faster requests»،
+    # «Sinopsis:» و پاراگراف‌های سینوپسیس حذف می‌شن)؛ هشتگ‌های خود پیج عیناً استفاده می‌شن و
+    # سیستم هشتگ‌سازی اجرا نمی‌شه.
+    'hanbil_project': {
+        'keep_lines': [
+            r'^\s*song\s*:',
+            r'^\s*artist\s*:',
+            r'^\s*anime\s*:',
+        ],
+        'own_hashtags': True,
+        'split_title': False,
+    },
+    # sylver_ae — کپشن و هشتگ‌ها عیناً و بدون هیچ دخالتی می‌رن؛ فقط قالب کانال (فوتر/blockquote) اعمال
+    # می‌شه. سیستم هشتگ‌سازی و هرگونه پاک‌سازی/حذف متن اجرا نمی‌شه.
+    'sylver_ae': {
+        'raw_caption': True,
+        'split_title': False,
+    },
+    # animecorner_ac — خط اول کپشن = عنوان bold؛ پاراگراف تبلیغ «Follow @animecornernews for more!» حذف؛
+    # بقیه‌ی متن داخل blockquote؛ هشتگ‌های پایانی خود پیج عیناً (بدون سیستم هشتگ‌سازی).
+    'animecorner_ac': {
+        'split_title': True,
+        'own_hashtags': True,
+        'strip_blocks': [
+            r'\bfollow\s+@[\w.]+',
+        ],
+    },
+    # ringwitdahoodie — متن کپشن کامل حذف می‌شه؛ فقط هشتگ‌های خود پیج (از هر جای کپشن) عیناً می‌رن،
+    # بدون سیستم هشتگ‌سازی؛ هشتگ‌های الکی فیلتر می‌شن؛ #trend همیشه اضافه می‌شه.
+    # blocked_hashtags: کوچک‌حرف، بدون # — بعداً دستی اضافه کن.
+    'ringwitdahoodie': {
+        'drop_text': True,
+        'own_hashtags': True,
+        'blocked_hashtags': ['fyp', 'explore'],
+        'extra_hashtags': ['trend'],
+    },
+    # animeronix — پیج معرفی انیمه، کپشن خودش نداره: کپشن ثابت ما گذاشته می‌شه (بدون سیستم هشتگ‌سازی)؛
+    # اسلاید اول (کاور/تبلیغ) حذف می‌شه؛ اگه بعد از حذف بیشتر از ۱۰ عکس بمونه، آلبوم‌های بعدی
+    # (۱۱ به بعد) به‌جای کپشن خالی، متن «ادامه‌ی آلبوم قبلی» می‌گیرن.
+    # ⚠️ fixed_caption جایگزین موقته — متن نهایی رو خودت بگو.
+    'animeronix': {
+        'drop_first': 1,
+        'drop_last': 0,
+        'split_title': False,
+        'fixed_caption': '#Anime #AnimeSpotlight',
+        'continuation_caption': '↪️ Continued from the previous album',
+    },
 }
