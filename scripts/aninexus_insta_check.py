@@ -210,9 +210,9 @@ def _truncate_text(text: str, max_len: int) -> str:
 
 FOOTER_HTML = (
     "𝗧𝗛𝗘 𝗟𝗔𝗕𝗦 ▸\n"
-    '├─ 🎴 <a href="https://t.me/+unWp5PLLPj4zYTQ0">𝑨𝒏𝒊𝑾𝒂𝒍𝒍 𝑳𝒂𝒃</a>\n'
-    '├─ 🪽 <a href="https://t.me/+51II96IApZY5ZThk">𝑾𝒂𝒊𝒇𝒖 𝑳𝒂𝒃</a>\n'
-    '└─ 🌌 <a href="https://t.me/AniNexus_Lab">𝑨𝒏𝒊𝑵𝒆𝒙𝒖𝒔 𝑳𝒂𝒃</a>'
+    '├─ 🎴 <a href="https://t.me/+DaLBmQfNUvU0Y2M0">𝑨𝒏𝒊𝑾𝒂𝒍𝒍 𝑳𝒂𝒃</a>\n'
+    '├─ 🪽 <a href="https://t.me/+jGEAdMPw6uoyZTg8">𝑾𝒂𝒊𝒇𝒖 𝑳𝒂𝒃</a>\n'
+    '└─ 🌌 <a href="https://t.me/+5NUPsURo5XBkOTg0">𝑨𝒏𝒊𝑵𝒆𝒙𝒖𝒔 𝑳𝒂𝒃</a>'
 )
 
 
