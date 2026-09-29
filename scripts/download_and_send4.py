@@ -406,11 +406,16 @@ def _load_dsend3():
     return dsend3
 
 
+ALBUM_PAUSE_SECONDS = 3   # مکث واقعی بین ارسال آلبوم‌های یک پست (فقط وقتی بیش از ۱۰ عکس باشه)
+ALBUM_SCHEDULE_GAP_SECONDS = 10   # فاصله‌ی زمان نمایش آلبوم‌ها توی کانال
+
+
 async def send_photo_album_scheduled(files, caption, chat_id, schedule_dt=None):
     """ارسال آلبوم عکس با قابلیت زمان‌بندی تلگرام (schedule=<datetime>).
-    اگه بیش از ۱۰ عکس باشه، مثل send3 به آلبوم‌های هم‌اندازه تقسیم می‌شه
-    (مثلاً ۱۵ → ۸+۷)، کپشن روی هر آلبوم می‌شینه و زمان هر آلبوم ۱۰ ثانیه
-    بعد از قبلی زمان‌بندی می‌شه تا ترتیب توی کانال حفظ بشه."""
+    بیش از ۱۰ عکس → آلبوم‌های هم‌اندازه مثل send3 (۱۵ → ۸+۷)، کپشن روی هر آلبوم،
+    زمان نمایش هر آلبوم ۱۰ ثانیه بعد از قبلی تا ترتیب توی کانال حفظ بشه.
+    عمداً از send3.send_items_to_telegram جدا نوشته شده (فقط عکسه، ویدیو قبلاً رد شده).
+    بخش «resolve کردن chat_id» عیناً از send3 کپی شده (باگ سشن تازه با آی‌دی خام کانال)."""
     from datetime import timedelta
     from telethon import TelegramClient
     from telethon.sessions import StringSession
@@ -433,8 +438,10 @@ async def send_photo_album_scheduled(files, caption, chat_id, schedule_dt=None):
         sent_messages = []
         for idx, chunk in enumerate(chunks):
             when = schedule_dt
-            if schedule_dt is not None and idx:
-                when = schedule_dt + timedelta(seconds=10 * idx)
+            if idx:
+                await asyncio.sleep(ALBUM_PAUSE_SECONDS)
+                if schedule_dt is not None:
+                    when = schedule_dt + timedelta(seconds=ALBUM_SCHEDULE_GAP_SECONDS * idx)
             sent = await client.send_file(
                 chat_id_value,
                 chunk if len(chunk) > 1 else chunk[0],

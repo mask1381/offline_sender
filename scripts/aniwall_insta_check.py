@@ -38,6 +38,7 @@ import download_and_send4 as dsend4          # noqa: E402 — کپشن هشتگ�
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
 APIFY_RESULTS_LIMIT = 12
+MAX_PHOTOS_PER_RUN = 95           # سقف پیام‌های زمان‌بندی‌شده‌ی تلگرام حدود ۱۰۰ه؛ ۵ تا جای خالی
 SCHEDULE_CALL_GAP_SECONDS = 5.0   # فاصله‌ی واقعی بین هر schedule call (محض اطمینان، نه فاصله‌ی نمایش)
 
 
@@ -173,12 +174,15 @@ def reset_workdir():
 
 
 # ─────────────────────────────────────────
-# مرحله‌ی ۱: جمع‌آوری همه‌ی پست‌های قابل‌ارسالِ همه‌ی پیج‌ها
+# مرحله‌ی ۱: جمع‌آوری پست‌های همه‌ی پیج‌ها (بدون دست زدن به state)
 # ─────────────────────────────────────────
-def collect_sendable_posts(pages: list) -> list:
-    """خروجی: لیستی از {"page": page_dict, "post": post_dict, "caption": html}
-    فقط شامل پست‌هایی که رد نشدن (نه ویدیو، نه بی‌ربط)."""
-    to_send = []
+def collect_posts(pages: list) -> list:
+    """خروجی: لیست ترتیب‌دار (پیج به پیج، قدیمی→جدید) از
+    {"page", "post", "caption", "why"}.
+    caption=None یعنی پست عمداً رد می‌شه (بدون رسانه / ویدیو / بی‌ربط)؛
+    state اون فقط توی مرحله‌ی ارسال و به ترتیب جلو می‌ره، نه اینجا — تا اگه
+    پست قبلیِ همون پیج ارسال نشد، state از روش رد نشه و پست گم نشه."""
+    entries = []
     for page in pages:
         username = page["username"]
         print(f"\n━━━ چک پیج: {username} ━━━")
@@ -198,65 +202,108 @@ def collect_sendable_posts(pages: list) -> list:
             media_items = post["media_items"]
 
             if not media_items:
-                print(f'⏭️ {shortcode}: بدون رسانه — رد شد (ولی state جلو می‌ره)')
-                page["last_post_id"] = shortcode
-                page["last_post_taken_at"] = post["takenAt"]
+                entries.append({"page": page, "post": post, "caption": None, "why": "بدون رسانه"})
                 continue
 
             if any((i.get("type") or "").lower() == "video" for i in media_items):
-                print(f'⏭️ {shortcode}: پست ویدیوئه — رد شد (ولی state جلو می‌ره)')
-                page["last_post_id"] = shortcode
-                page["last_post_taken_at"] = post["takenAt"]
+                entries.append({"page": page, "post": post, "caption": None, "why": "پست ویدیوئه"})
                 continue
 
             caption, why = dsend4.build_hashtag_caption(post["caption"])
             if caption is None:
-                print(f'⏭️ {shortcode}: {why} — رد شد (ولی state جلو می‌ره)')
-                page["last_post_id"] = shortcode
-                page["last_post_taken_at"] = post["takenAt"]
+                entries.append({"page": page, "post": post, "caption": None, "why": why})
                 continue
 
-            print(f'🏷️ {shortcode}: {why}')
-            to_send.append({"page": page, "post": post, "caption": caption})
+            print(f"🏷️ {shortcode}: {why}")
+            entries.append({"page": page, "post": post, "caption": caption, "why": why})
 
-    return to_send
+    return entries
 
 
 # ─────────────────────────────────────────
-# مرحله‌ی ۲: زمان‌بندی و ارسال
+# سقف تعداد عکس: پستی که جمع رو از سقف رد کنه کامل حذف می‌شه، همراه بقیه‌ی
+# پست‌های همون پیج (تا state رد نشه)؛ شب بعد دوباره از همون‌جا میاد.
 # ─────────────────────────────────────────
-def schedule_all(to_send: list, chat_id: str):
-    if not to_send:
+def apply_photo_cap(entries: list) -> list:
+    total = 0
+    blocked = set()
+    plan = []
+    for e in entries:
+        name = e["page"]["username"]
+        shortcode = e["post"]["shortcode"]
+        if name in blocked:
+            print(f"⏸️ {shortcode} ({name}): به شب بعد موکول شد (پست قبلیِ این پیج جا نشد)")
+            continue
+        if e["caption"] is not None:
+            n = len(e["post"]["media_items"])
+            if total + n > MAX_PHOTOS_PER_RUN:
+                blocked.add(name)
+                print(f"⏸️ {shortcode} ({name}): {n} عکس از سقف {MAX_PHOTOS_PER_RUN} رد می‌شه "
+                      f"(جمع فعلی {total}) — به شب بعد موکول شد")
+                continue
+            total += n
+        plan.append(e)
+    print(f"\n📊 جمع عکس‌های این اجرا: {total} از سقف {MAX_PHOTOS_PER_RUN}")
+    return plan
+
+
+# ─────────────────────────────────────────
+# مرحله‌ی ۲: زمان‌بندی و ارسال (state بعد از هر پستِ موفق ذخیره و commit می‌شه)
+# ─────────────────────────────────────────
+def advance_state(page: dict, post: dict):
+    page["last_post_id"] = post["shortcode"]
+    page["last_post_taken_at"] = post["takenAt"]
+
+
+def schedule_all(plan: list, chat_id: str, pages: list, pages_file: str):
+    send_entries = [e for e in plan if e["caption"] is not None]
+    if not send_entries:
         print("\nℹ️ هیچ پستی برای زمان‌بندی نبود")
-        return
-
     now = datetime.now(timezone.utc)
-    times = dsend4.compute_schedule_times(now, len(to_send))
+    times = dsend4.compute_schedule_times(now, len(send_entries))
+    if times:
+        print(f"\n🗓️ {len(send_entries)} پست، زمان‌بندی بین "
+              f"{times[0].strftime('%H:%M UTC')} تا {times[-1].strftime('%H:%M UTC')}")
+    times_iter = iter(times)
 
-    print(f"\n🗓️ {len(to_send)} پست، زمان‌بندی بین "
-          f"{times[0].strftime('%H:%M UTC')} تا {times[-1].strftime('%H:%M UTC')}")
-
-    for item, when in zip(to_send, times):
-        page = item["page"]
-        post = item["post"]
+    failed_pages = set()
+    for e in plan:
+        page = e["page"]
+        post = e["post"]
+        name = page["username"]
         shortcode = post["shortcode"]
+
+        if name in failed_pages:
+            print(f"⏸️ {shortcode} ({name}): رد شد چون پست قبلیِ این پیج شکست خورد — شب بعد دوباره")
+            continue
+
+        if e["caption"] is None:
+            print(f"⏭️ {shortcode}: {e['why']} — رد شد (state به ترتیب جلو می‌ره)")
+            advance_state(page, post)
+            continue
+
+        when = next(times_iter)
         try:
             reset_workdir()
             files = dsend3.download_media_direct(post["media_items"])
             sent = asyncio.run(
-                dsend4.send_photo_album_scheduled(files, item["caption"], chat_id, schedule_dt=when)
+                dsend4.send_photo_album_scheduled(files, e["caption"], chat_id, schedule_dt=when)
             )
             ids = ", ".join(str(s.id) for s in sent)
             print(f"✅ {shortcode} زمان‌بندی شد برای {when.strftime('%Y-%m-%d %H:%M UTC')} "
                   f"(message_id(s)={ids})")
-            page["last_post_id"] = shortcode
-            page["last_post_taken_at"] = post["takenAt"]
-        except FloodWaitError as e:
-            print(f"⏳ FloodWait: {e.seconds} ثانیه — توقف کل ران (state تا همینجا ثبت می‌شه)")
+            advance_state(page, post)
+            # ذخیره‌ی فوری: اگه ران وسط کار کرش کنه، پست‌های انجام‌شده شب بعد تکراری نمی‌شن
+            save_pages(pages_file, pages)
+            git_commit_and_push(pages_file, f"aniwall-insta: {name} {shortcode} scheduled")
+        except FloodWaitError as exc:
+            print(f"⏳ FloodWait: {exc.seconds} ثانیه — توقف کل ران (state تا همینجا ثبت شده)")
             break
-        except Exception as e:
-            print(f"❌ زمان‌بندی {shortcode} شکست خورد ({e}) — این پیج از همینجا برای دفعه‌ی بعد retry می‌شه")
-            # state این پست جلو نمی‌ره، ولی بقیه‌ی پیج‌ها/پست‌ها ادامه پیدا می‌کنن
+        except (Exception, SystemExit) as exc:
+            # SystemExit هم گرفته می‌شه چون download_media_direct موقع fail کامل sys.exit می‌زنه
+            failed_pages.add(name)
+            print(f"❌ زمان‌بندی {shortcode} شکست خورد ({type(exc).__name__}: {exc}) — "
+                  f"بقیه‌ی پست‌های {name} این شب رد می‌شن و از همینجا شب بعد retry می‌شن")
         time.sleep(SCHEDULE_CALL_GAP_SECONDS)
 
 
@@ -281,12 +328,14 @@ def main():
         print("ℹ️ aniwall_pages.json خالیه — هیچ پیجی برای چک کردن نیست")
         return
 
-    to_send = collect_sendable_posts(pages)
-    schedule_all(to_send, args.chat_id)
-
-    # هر پیجی که state ش (چه با ارسال، چه با رد آگاهانه) جلو رفته، اینجا ذخیره می‌شه
-    save_pages(args.pages_file, pages)
-    git_commit_and_push(args.pages_file, "aniwall-insta: nightly check + schedule")
+    entries = collect_posts(pages)
+    plan = apply_photo_cap(entries)
+    try:
+        schedule_all(plan, args.chat_id, pages, args.pages_file)
+    finally:
+        # ذخیره‌ی نهایی (شامل پست‌های عمداً ردشده که آخر لیست بودن)
+        save_pages(args.pages_file, pages)
+        git_commit_and_push(args.pages_file, "aniwall-insta: nightly check + schedule")
 
     print("\n✅ تمام شد")
 
