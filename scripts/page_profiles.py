@@ -23,6 +23,12 @@
   strip_blocks          : لیست regex؛ پاراگراف‌های (جداشده با خط خالی) کپشن که بخورن حذف می‌شن (re.I|re.M)
   split_title           : False = خط اول کپشن عنوان bold جدا نشه (همه‌چیز توی blockquote)؛ پیش‌فرض True
   redundant_tags        : {'genshin': 'genshinimpact'} → #genshin حذف می‌شه اگه #genshinimpact هم باشه
+  protect_blocks        : لیست regex؛ پاراگراف‌های منطبق (مثل «Via X») هنگام کوتاه‌سازی به سقف ۱۰۲۴ حذف نمی‌شن
+                          (بقیه‌ی متن کوتاه می‌شه و «…» می‌گیره؛ پاراگراف محافظت‌شده آخر کپشن می‌مونه)
+  character_tags        : اسم فرنچایز (مثل 'Genshin Impact') → اسم شخصیت‌های داخل متن با دیکشنری v4 هشتگ می‌شن
+                          (به ترتیب ظهور در متن؛ پاراگراف‌های protect_blocks در تشخیص حساب نمی‌شن؛ حداکثر ۶ تا)
+  (کلیدهای پروفایل‌های ANINEXUS — keep_lines, own_hashtags, raw_caption, drop_text, blocked_hashtags,
+   extra_hashtags, fixed_caption, continuation_caption — توضیحشون بالای همون پروفایل‌هاست)
 
 قالب هر قاعده (همون TEXT_RULES در download_and_send3.py):
   {'kind': 'LEAK', 'video': True|False, 'patterns': [('title'|'text', r'regex'), ...]}
@@ -64,6 +70,20 @@ PROFILES = {
             r'like\s*&\s*follow',                 # ↠ Like & Follow for more ...
             r'^[^\w\n]*hashtags?[^\w\n]*$',       # ✦ Hashtags (تیتر؛ خود هشتگ‌ها جدا استخراج می‌شن)
         ],
+    },
+
+    # gensh1nuniverse — پیج لیک؛ کپشن: TITLE / بولت‌ها / «Via X» / #GenshinImpact (بدون تبلیغ)
+    # همه‌چیز LEAK؛ بدون کراپ و بدون حذف اسلاید؛ عنوان bold جدا نمی‌شه (همه داخل blockquote)؛
+    # خط اعتبار «Via ...» هیچ‌وقت با کوتاه‌سازی حذف نمی‌شه؛ اسم شخصیت‌ها هشتگ می‌شن؛
+    # ۹۰ دقیقه بعد منتشر می‌شه (steambird ۶۰ دقیقه) تا دو پیج با هم قاطی نشن.
+    'gensh1nuniverse': {
+        'text_rules': [],
+        'unmatched_non_video': 'LEAK',
+        'video_fallback': 'LEAK',
+        'schedule_delay_min': 90,
+        'split_title': False,
+        'protect_blocks': [r'^\s*via\b'],
+        'character_tags': 'Genshin Impact',
     },
 
     # ───────── پیج‌های ANINEXUS (aninexus_pages.json) ─────────
