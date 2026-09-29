@@ -246,6 +246,10 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
         print(f'⏭️ {post["shortcode"]}: بدون رسانه — رد شد')
         return True
 
+    profile = profile or {}
+    orig_count = len(media_items)
+    media_items = dsend.apply_media_drops(media_items, profile)   # drop_first / drop_last پروفایل
+
     reset_workdir()
 
     duration, tags, kind = None, [], None
@@ -266,6 +270,16 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
         files = dsend.download_media_direct(media_items)
     else:
         files = files_after
+        if replaced:
+            # instaloader کل پست رو (با اسلایدهای حذف‌شده) گرفته؛ همون برش رو روی فایل‌ها اعمال کن
+            start, end = dsend.drop_range(orig_count, profile)
+            if len(files) == orig_count and (start, end) != (0, orig_count):
+                files = files[start:end]
+            elif len(files) != orig_count and (start, end) != (0, orig_count):
+                print(f"⚠️ {post['shortcode']}: تعداد فایل‌های fallback ({len(files)}) با پست ({orig_count}) نمی‌خونه — حذف اسلاید اعمال نشد")
+
+    # کراپ پایین عکس‌ها (پروفایل: crop_bottom_pct) — فقط عکس، ویدیو دست‌نخورده
+    files = dsend.crop_bottom_pct_files(files, profile.get("crop_bottom_pct"))
 
     thumb, video_meta = None, None
     if any((i.get("type") or "").lower() == "video" for i in media_items):
@@ -283,15 +297,19 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
             duration = max(ds) if ds else None
             kind, why = dsend.decide_type(media_items, caption_raw, duration, profile)
             print(f"🏷️ نوع={kind} | {why}")
-        caption_final = dsend.build_channel_caption(kind, caption_raw, tags, post["url"])
+        caption_final = dsend.build_channel_caption(kind, caption_raw, tags, post["url"], profile)
     else:
         caption_final = dsend.build_caption(caption_raw)
 
+    schedule_dt = dsend.compute_schedule_dt(profile)
     sent = asyncio.run(
-        dsend.send_items_to_telegram(files, caption_final, chat_id, thumb, video_meta)
+        dsend.send_items_to_telegram(files, caption_final, chat_id, thumb, video_meta, schedule_dt)
     )
     ids = ", ".join(str(s.id) for s in sent)
-    print(f'✅ {post["shortcode"]} ارسال شد. message_id(s)={ids}')
+    if schedule_dt:
+        print(f'⏰ {post["shortcode"]} زمان‌بندی شد برای {schedule_dt:%Y-%m-%d %H:%M} UTC. message_id(s)={ids}')
+    else:
+        print(f'✅ {post["shortcode"]} ارسال شد. message_id(s)={ids}')
     return True
 
 

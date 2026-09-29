@@ -176,6 +176,78 @@ def resolve_profile(name):
     return dict(PROFILES[name])
 
 
+def drop_range(n: int, profile: dict = None):
+    """(start, end) اسلایدهایی که می‌مونن. drop_first/drop_last از پروفایل؛ فقط وقتی اعمال می‌شه که
+    تعداد آیتم‌ها >= drop_min_items باشه (پیش‌فرض: first+last+1 → همیشه حداقل یه آیتم می‌مونه)."""
+    profile = profile or {}
+    first = max(0, int(profile.get('drop_first', 0) or 0))
+    last = max(0, int(profile.get('drop_last', 0) or 0))
+    if not (first or last):
+        return 0, n
+    min_items = int(profile.get('drop_min_items', first + last + 1))
+    if n < max(min_items, first + last + 1):
+        return 0, n
+    return first, n - last
+
+
+def apply_media_drops(media_items: list, profile: dict = None) -> list:
+    """حذف اسلایدهای تبلیغاتی ثابت (اول/آخر) قبل از دانلود."""
+    start, end = drop_range(len(media_items), profile)
+    if (start, end) == (0, len(media_items)):
+        return media_items
+    print(f'✂️ حذف خودکار اسلاید: {start} از اول، {len(media_items) - end} از آخر '
+          f'({len(media_items)} → {end - start} آیتم)')
+    return media_items[start:end]
+
+
+def crop_bottom_pct_files(files: list, pct) -> list:
+    """pct٪ پایین عکس‌ها (jpg/jpeg/png) رو می‌بُره (درجا). ویدیو دست‌نخورده می‌مونه."""
+    try:
+        pct = float(pct or 0)
+    except (TypeError, ValueError):
+        pct = 0
+    if pct <= 0:
+        return files
+    pct = min(pct, 40.0)  # سقف اطمینان
+    for f in files:
+        if not f.lower().endswith(('.jpg', '.jpeg', '.png')):
+            continue
+        try:
+            with Image.open(f) as im:
+                w, h = im.size
+                new_h = max(1, int(round(h * (1 - pct / 100.0))))
+                cropped = im.crop((0, 0, w, new_h))
+            if f.lower().endswith('.png'):
+                cropped.save(f, 'PNG')
+            else:
+                if cropped.mode not in ('RGB', 'L'):
+                    cropped = cropped.convert('RGB')
+                cropped.save(f, 'JPEG', quality=95)
+        except Exception as e:
+            print(f'⚠️ کراپ {os.path.basename(f)} نشد: {e}')
+    print(f'✂️ {pct:g}٪ پایین عکس‌ها کراپ شد')
+    return files
+
+
+def compute_schedule_dt(profile: dict = None):
+    """زمان انتشار برای schedule تلگرام (UTC، aware) یا None = فوری. کلید: schedule_delay_min."""
+    mins = (profile or {}).get('schedule_delay_min')
+    if not mins:
+        return None
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone.utc) + timedelta(minutes=float(mins))
+
+
+def strip_caption_blocks(caption: str, patterns) -> str:
+    """پاراگراف‌هایی (جداشده با خط خالی) از کپشن که با هر کدوم از regexهای patterns بخورن حذف می‌شن."""
+    if not patterns or not caption:
+        return caption
+    regs = [re.compile(p, re.I | re.M) for p in patterns]
+    kept = [para for para in re.split(r'\n[ \t]*\n', caption)
+            if not any(r.search(para) for r in regs)]
+    return '\n\n'.join(kept)
+
+
 BOLD_ITALIC_MAP = {
     'a': '𝒂', 'b': '𝒃', 'c': '𝒄', 'd': '𝒅', 'e': '𝒆', 'f': '𝒇', 'g': '𝒈', 'h': '𝒉', 'i': '𝒊',
     'j': '𝒋', 'k': '𝒌', 'l': '𝒍', 'm': '𝒎', 'n': '𝒏', 'o': '𝒐', 'p': '𝒑', 'q': '𝒒', 'r': '𝒓',
@@ -462,17 +534,27 @@ def split_title(body: str):
     return '', body
 
 
-def build_channel_caption(kind: str, original_caption: str, tags: list, post_url: str = '') -> str:
+def build_channel_caption(kind: str, original_caption: str, tags: list, post_url: str = '', profile: dict = None) -> str:
+    profile = profile or {}
     t = TAXONOMY[kind]
     link_part = f'🔗 <a href="{post_url}">{bi("Source")}</a>\n\n' if (SHOW_SOURCE and post_url) else ''
 
+    original_caption = strip_caption_blocks(original_caption, profile.get('strip_blocks'))
     body = strip_hashtags(original_caption)
-    title, body = split_title(body) if body else ('', '')
+    if body and profile.get('split_title', True):
+        title, body = split_title(body)
+    else:
+        title = ''
     # bi اول، escape بعد (وگرنه &amp; هم bold-italic می‌شد و خراب می‌شد)
     title_part = f'<b>{html.escape(bi(title), quote=False)}</b>\n\n' if title else ''
 
     type_tag = '#' + t['tag']
     extra = [h for h in tags if h.lower() != type_tag.lower()]
+    # redundant_tags: {'genshin': 'genshinimpact'} → #genshin حذف می‌شه اگه #genshinimpact هم باشه
+    present = {h.lstrip('#').lower() for h in extra}
+    for redundant, covering in (profile.get('redundant_tags') or {}).items():
+        if covering.lower() in present:
+            extra = [h for h in extra if h.lstrip('#').lower() != redundant.lower()]
 
     def tag_line(ex):
         return ' '.join([type_tag] + ex) + '\n\n'
@@ -882,7 +964,7 @@ def download_reddit(url: str):
 # ─────────────────────────────────────────
 # ارسال به تلگرام با Telethon (اکانت شخصی)
 # ─────────────────────────────────────────
-async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta=None):
+async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta=None, schedule=None):
     client = TelegramClient(StringSession(TG_SESSION_STRING), int(TG_API_ID), TG_API_HASH)
     await client.connect()
 
@@ -908,6 +990,7 @@ async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta
                 caption=caption,
                 parse_mode=pick_parse_mode(caption),
                 supports_streaming=True,
+                schedule=schedule,
             )
             if isinstance(sent, list):
                 sent_messages.extend(sent)
@@ -938,6 +1021,7 @@ async def send_items_to_telegram(files, caption, chat_id, thumb=None, video_meta
                     caption=caption,
                     parse_mode=pick_parse_mode(caption),
                     supports_streaming=True,
+                    schedule=schedule,
                     attributes=attributes,
                     **extra,
                 )
@@ -1030,7 +1114,7 @@ def main():
                     if kind == 'PENDING':
                         print('⚠️ dry-run: فیلد duration نیومده (بعد از دانلود از خود فایل خونده می‌شه)')
                         return
-                    cap = build_channel_caption(kind, args.caption, tags, args.url.strip())
+                    cap = build_channel_caption(kind, args.caption, tags, args.url.strip(), profile)
                     print(f'🧪 طول قابل‌نمایش: {_visible_len(cap)}/{MAX_TG_CAPTION_LEN}\n')
                     print(cap)
                     return
@@ -1051,7 +1135,7 @@ def main():
                         sys.exit(1)
                     kind, why = decide_type(media_items, args.caption, duration, profile)
                     print(f'🏷️ نوع={kind} | {why}')
-                caption_override = build_channel_caption(kind, args.caption, tags, args.url.strip())
+                caption_override = build_channel_caption(kind, args.caption, tags, args.url.strip(), profile)
 
         # ── مسیر قدیمی: فقط برای ردیت (یا اینستاگرام از طریق instaloader اگه صراحتاً بخوای) ──
         else:

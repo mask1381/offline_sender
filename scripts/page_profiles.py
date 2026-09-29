@@ -16,6 +16,13 @@
   video_fallback        : نوع ویدیویی که هیچ قاعده‌ی متنی نخورد؛ اگه ندی، قاعده‌ی مدت (کلیپ/دمو/تریلر)
   clip_max_seconds      : مرز کلیپ/دمو-تریلر بر حسب ثانیه
   extra_generic_tags    : هشتگ‌های اضافه که «اشاره به شخصیت» حساب نشن (کوچک‌حرف، بدون فاصله/زیرخط)
+  drop_first / drop_last: تعداد اسلاید ثابتِ اول/آخر کروسل که قبل از دانلود حذف بشه (تبلیغ)
+  drop_min_items        : حداقل تعداد آیتم برای اعمال حذف (پیش‌فرض first+last+1؛ همیشه یه آیتم می‌مونه)
+  crop_bottom_pct       : درصدی از پایین *عکس‌ها* که کراپ بشه (ویدیو دست‌نخورده)
+  schedule_delay_min    : ارسال با schedule تلگرام، N دقیقه بعد (None/۰ = فوری) — برای review توی scheduled
+  strip_blocks          : لیست regex؛ پاراگراف‌های (جداشده با خط خالی) کپشن که بخورن حذف می‌شن (re.I|re.M)
+  split_title           : False = خط اول کپشن عنوان bold جدا نشه (همه‌چیز توی blockquote)؛ پیش‌فرض True
+  redundant_tags        : {'genshin': 'genshinimpact'} → #genshin حذف می‌شه اگه #genshinimpact هم باشه
 
 قالب هر قاعده (همون TEXT_RULES در download_and_send3.py):
   {'kind': 'LEAK', 'video': True|False, 'patterns': [('title'|'text', r'regex'), ...]}
@@ -35,5 +42,27 @@ PROFILES = {
         'extra_rules': [],
         'unmatched_non_video': 'LEAK',
         'video_fallback': 'LEAK',
+    },
+
+    # steambird.id — همه‌چیز LEAK؛ اسلاید اول (کاور تبلیغاتی) خودکار حذف می‌شه (۳ تای آخر عمداً نه،
+    # چون گاهی محتوای اصلی اونجاست → خودت از scheduled پاک می‌کنی)؛ ۱۰٪ پایین عکس‌ها (فوتر برند پیج)
+    # کراپ می‌شه؛ همه‌ی پست‌ها (عکس/ویدیو/آلبوم) ۶۰ دقیقه بعد منتشر می‌شن تا review کنی.
+    'steambird': {
+        'text_rules': [],
+        'unmatched_non_video': 'LEAK',
+        'video_fallback': 'LEAK',
+        'drop_first': 1,
+        'drop_last': 0,
+        'drop_min_items': 3,
+        'crop_bottom_pct': 10,
+        'schedule_delay_min': 60,
+        'split_title': False,
+        'redundant_tags': {'genshin': 'genshinimpact'},
+        'strip_blocks': [
+            r'^[^\w\n]*cover\s*art\b',           # ✦ Cover Art + لینک pixiv
+            r'leaks\s+and\s+news\s+about',        # ↠ Leaks and News about Genshin Impact
+            r'like\s*&\s*follow',                 # ↠ Like & Follow for more ...
+            r'^[^\w\n]*hashtags?[^\w\n]*$',       # ✦ Hashtags (تیتر؛ خود هشتگ‌ها جدا استخراج می‌شن)
+        ],
     },
 }
