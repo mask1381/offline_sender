@@ -407,35 +407,63 @@ async def send_items_to_telegram(files, caption, chat_id):
 
     chat_id_value = int(chat_id) if str(chat_id).lstrip('-').isdigit() else chat_id
 
+    ALBUM_MAX = 10          # سقف آلبوم تلگرام
+    PAUSE_BETWEEN = 4       # ثانیه مکث بین ارسال‌ها
+
+    def is_media(fp):
+        return fp.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4'))
+
+    def split_balanced(items, max_size):
+        """۱۵ → ۸+۷ ، ۲۳ → ۸+8+7 ؛ دسته‌ی آخر تک‌افتاده نمی‌شه."""
+        n = len(items)
+        parts = -(-n // max_size)          # ceil
+        base, extra = divmod(n, parts)
+        out, start = [], 0
+        for i in range(parts):
+            size = base + (1 if i < extra else 0)
+            out.append(items[start:start + size])
+            start += size
+        return out
+
+    async def send_with_retry(**kwargs):
+        # اگه FloodWait اومد، همون مدت صبر می‌کنیم و یک بار دوباره تلاش می‌کنیم
+        try:
+            return await client.send_file(chat_id_value, **kwargs)
+        except FloodWaitError as e:
+            print(f'⏳ FloodWait: {e.seconds} ثانیه صبر و تلاش دوباره...')
+            await asyncio.sleep(e.seconds + 1)
+            return await client.send_file(chat_id_value, **kwargs)
+
     sent_messages = []
     try:
-        def is_media(fp):
-            return fp.lower().endswith(('.jpg', '.jpeg', '.png', '.mp4'))
-
-        if len(files) > 1 and all(is_media(p) for p in files) and len(files) <= 10:
-            # آلبوم گروهی — کپشن فقط رو فایل اول اعمال می‌شه (محدودیت تلگرام)
-            sent = await client.send_file(
-                chat_id_value,
-                files,
-                caption=caption,
-                parse_mode='html',
-                supports_streaming=True,
-            )
-            if isinstance(sent, list):
-                sent_messages.extend(sent)
-            else:
-                sent_messages.append(sent)
+        if all(is_media(p) for p in files):
+            # تک‌فایل هم همین مسیر رو میره (یک دسته‌ی یک‌تایی)
+            batches = split_balanced(files, ALBUM_MAX)
+            for i, batch in enumerate(batches):
+                if i > 0:
+                    await asyncio.sleep(PAUSE_BETWEEN)
+                sent = await send_with_retry(
+                    file=batch if len(batch) > 1 else batch[0],
+                    caption=caption,           # کپشن روی هر آلبوم
+                    parse_mode='html',
+                    supports_streaming=True,
+                )
+                if isinstance(sent, list):
+                    sent_messages.extend(sent)
+                else:
+                    sent_messages.append(sent)
+                print(f'📨 آلبوم {i + 1}/{len(batches)} ارسال شد ({len(batch)} فایل)')
         else:
-            # fallback: تک‌تک (برای فایل غیرمدیا یا بیش از ۱۰ فایل)
-            for f in files:
-                attributes = [DocumentAttributeFilename(os.path.basename(f))]
-                sent = await client.send_file(
-                    chat_id_value,
-                    f,
+            # fallback: فایل غیرمدیا (مثل gif) → تک‌تک
+            for i, f in enumerate(files):
+                if i > 0:
+                    await asyncio.sleep(PAUSE_BETWEEN)
+                sent = await send_with_retry(
+                    file=f,
                     caption=caption,
                     parse_mode='html',
                     supports_streaming=True,
-                    attributes=attributes,
+                    attributes=[DocumentAttributeFilename(os.path.basename(f))],
                 )
                 sent_messages.append(sent)
     finally:
