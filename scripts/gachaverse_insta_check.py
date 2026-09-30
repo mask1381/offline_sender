@@ -258,8 +258,11 @@ def build_game_caption(original_caption: str, shortcode: str):
         ngrams |= dsend4.text_ngrams(translated)
 
     franchises = detect_game_franchises(hashtags, ngrams)
+    
+    # FALLBACK: اگر فرنچایز نشناخت → کپشن اصلی + فوتر
     if not franchises:
-        return None, 'فرنچایز بازی تشخیص داده نشد — رد شد'
+        caption = f"{original_caption}\n{FOOTER}"
+        return caption, f'⚠️ فرنچایز شناخت‌نشده → send original caption'
 
     characters = []
     for fr in franchises:
