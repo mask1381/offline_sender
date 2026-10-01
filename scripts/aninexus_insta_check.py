@@ -50,6 +50,7 @@ from telethon.errors import FloodWaitError
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import download_and_send3 as dsend3          # noqa: E402 — دانلود/entity resolution
 import download_and_send4 as dsend4          # noqa: E402 — کپشن هشتگی/ارسال زمان‌دار
+import gacha_insta_check as base             # noqa: E402 — ensure_audio (فال‌بک صدا با instaloader)
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
@@ -182,6 +183,7 @@ def fetch_new_posts(page: dict) -> list:
             "shortcode": p["shortCode"],
             "takenAt": ts(p),
             "caption": p.get("caption") or "",
+            "url": f"https://www.instagram.com/p/{p['shortCode']}/",
             "media_items": build_media_items(p),
         }
         for p in new_posts
@@ -419,6 +421,7 @@ def collect_sendable_posts(pages: list) -> list:
         print(f"📬 {len(new_posts)} پست جدید")
         for post in new_posts:
             shortcode = post["shortcode"]
+            post["orig_count"] = len(post["media_items"])   # برای اعمال دوباره‌ی drop روی فایل‌های فال‌بک صدا
             media_items = dsend3.apply_media_drops(post["media_items"], profile)   # drop_first/drop_last
             post["media_items"] = media_items
 
@@ -439,7 +442,8 @@ def collect_sendable_posts(pages: list) -> list:
                 caption = build_full_caption(post["caption"], hashtag_html)
             kinds = ",".join(sorted({(i.get("type") or "").lower() for i in media_items}))
             print(f'🏷️ {shortcode} [{kinds}]: {why}')
-            to_send.append({"page": page, "post": post, "caption": caption, "continuation": continuation})
+            to_send.append({"page": page, "post": post, "caption": caption, "continuation": continuation,
+                            "profile": profile})
 
     return to_send
 
@@ -465,12 +469,37 @@ def schedule_all(to_send: list, chat_id: str):
         try:
             reset_workdir()
             files = dsend3.download_media_direct(post["media_items"])
+
+            # ─── چک صدا + فال‌بک instaloader (مثل gacha_insta_check) ───
+            # لینک videoUrl اپیفای گاهی preview بی‌صدا می‌ده؛ اگه هر mp4 بدون audio track بود،
+            # کل پست با instaloader از خود صفحه‌ی پست گرفته می‌شه.
+            replaced = False
+            files_after, replaced = base.ensure_audio(files, post["url"], shortcode)
+            if files_after is None:
+                # فال‌بک fail شد و workdir پاک شده بود → دوباره از CDN
+                files = dsend3.download_media_direct(post["media_items"])
+                replaced = False
+            else:
+                files = files_after
+                if replaced:
+                    # instaloader کل پست (با اسلایدهای حذف‌شده) رو آورده؛ همون برش پروفایل رو اعمال کن
+                    orig_count = post.get("orig_count", len(files))
+                    start, end = dsend3.drop_range(orig_count, item.get("profile"))
+                    if (start, end) != (0, orig_count):
+                        if len(files) == orig_count:
+                            files = files[start:end]
+                        else:
+                            print(f"⚠️ {shortcode}: تعداد فایل‌های فال‌بک ({len(files)}) با پست ({orig_count}) "
+                                  f"نمی‌خونه — حذف اسلاید اعمال نشد")
+
             thumb = None
             video_meta = None
             if any(f.lower().endswith(".mp4") for f in files):
                 thumb = dsend3.prepare_thumb(post["media_items"], files)
-                first_video = next((i for i in post["media_items"] if (i.get("type") or "").lower() == "video"), {})
-                video_meta = {"duration": first_video.get("duration")}
+                # اگه فایل از instaloader اومده، متادیتای اپیفای معتبر نیست؛ video_attributes از خود فایل می‌خونه
+                if not replaced:
+                    first_video = next((i for i in post["media_items"] if (i.get("type") or "").lower() == "video"), {})
+                    video_meta = {"duration": first_video.get("duration")}
             sent = asyncio.run(
                 send_scheduled(files, item["caption"], chat_id, when, thumb=thumb, video_meta=video_meta,
                                continuation_caption=item.get("continuation"))
