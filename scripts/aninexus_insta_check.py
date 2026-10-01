@@ -307,15 +307,27 @@ def _hashtag_block(tags: list) -> str:
     return f"<blockquote>💠 {' '.join(tags)}</blockquote>" if tags else ""
 
 
+_LATIN_TAG_RE = re.compile(r"[A-Za-z0-9_\u00C0-\u024F]+")
+
+
+def _latin_tag(h: str) -> str:
+    """هشتگ → فقط بخش لاتین ابتدای آن. «#millenniumparade好きな人と繋がりたい» → «millenniumparade»؛
+    هشتگ کاملاً غیرلاتین (مثل #好きな人と繋がりたい) → '' (حذف می‌شه). کمتر از ۲ کاراکتر هم حذف."""
+    m = _LATIN_TAG_RE.match(h.lstrip("#"))
+    tag = m.group(0) if m else ""
+    return tag if len(tag) >= 2 else ""
+
+
 def _own_hashtags(caption: str, profile: dict) -> list:
-    """هشتگ‌های خود پیج (از هر جای کپشن، بدون تکرار) − blocked + extra."""
+    """هشتگ‌های خود پیج (از هر جای کپشن، بدون تکرار، فقط لاتین) − blocked + extra."""
     blocked = {str(b).lstrip("#").lower() for b in (profile.get("blocked_hashtags") or ())}
     out, seen = [], set()
     for h in dsend3.extract_hashtags(caption):
-        key = h.lstrip("#").lower()
+        tag = _latin_tag(h)
+        key = tag.lower()
         if key and key not in blocked and key not in seen:
             seen.add(key)
-            out.append("#" + h.lstrip("#"))
+            out.append("#" + tag)
     for h in (profile.get("extra_hashtags") or ()):
         key = str(h).lstrip("#").lower()
         if key and key not in seen:
@@ -324,13 +336,28 @@ def _own_hashtags(caption: str, profile: dict) -> list:
     return out
 
 
-def _clean_raw(caption: str) -> str:
-    """raw_caption: فقط توکن‌های هشتگ برداشته می‌شن (چون جدا می‌رن)، بقیه‌ی متن دست‌نخورده."""
-    t = dsend3.HASHTAG_RE.sub("", caption or "")
+_TRAILING_TAGS_RE = re.compile(r"(?:[ \t]*#\w+)+[ \t]*$")
+
+
+def _strip_hashtags(text: str) -> str:
+    """هشتگ‌های *انتهای خط* (بلوک هشتگ) حذف می‌شن؛ هشتگی که وسط جمله اومده فقط # ش برداشته می‌شه
+    و کلمه می‌مونه («#BREAKING: X» → «BREAKING: X»، نه «: X»). علامت‌های یتیم ابتدای متن هم پاک می‌شن."""
+    lines = []
+    for line in (text or "").split("\n"):
+        head = _TRAILING_TAGS_RE.sub("", line)
+        head = dsend3.HASHTAG_RE.sub(lambda m: m.group(0)[1:], head)
+        lines.append(head)
+    t = "\n".join(lines)
     t = re.sub(r"[ \t]+\n", "\n", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     t = re.sub(r"\n{3,}", "\n\n", t)
+    t = re.sub(r"^[\s:;,\-–—|]+", "", t)
     return t.strip()
+
+
+def _clean_raw(caption: str) -> str:
+    """raw_caption: بلوک هشتگ برداشته می‌شه (چون جدا می‌ره)، بقیه‌ی متن دست‌نخورده."""
+    return _strip_hashtags(caption)
 
 
 def _keep_lines(text: str, patterns) -> str:
@@ -381,7 +408,7 @@ def build_profile_caption(caption_raw: str, profile: dict):
         text = dsend3.strip_caption_blocks(caption_raw, profile.get("strip_blocks"))
         if profile.get("keep_lines"):
             text = _keep_lines(text, profile["keep_lines"])
-        body = dsend3.strip_hashtags(text)
+        body = _strip_hashtags(text)
         if body and profile.get("split_title", True):
             title, body = dsend3.split_title(body)
 
@@ -393,6 +420,72 @@ def build_profile_caption(caption_raw: str, profile: dict):
     why = (f"پروفایل: عنوان={'✓' if title else '✗'} متن={'✓' if body else '✗'} "
            f"هشتگ={len(tags)}{' | کپشن ادامه ✓' if continuation else ''}")
     return _compose_caption(title, body, tags), continuation, why
+
+
+WARNINGS: list = []   # همه‌ی هشدارهای ران؛ آخر ران با ::warning:: توی خلاصه‌ی GitHub Actions چاپ می‌شن
+
+
+def warn(msg: str):
+    WARNINGS.append(msg)
+    print(f"   ⚠️ {msg}")
+
+
+def lint_caption(raw: str, caption_html: str, profile: dict) -> list:
+    """کپشن نهایی رو چک می‌کنه و لیست مشکل‌های مشکوک رو برمی‌گردونه (چیزی رو تغییر نمی‌ده)."""
+    out = []
+    body_m = re.search(r"<blockquote expandable>(.*?)</blockquote>", caption_html, re.S)
+    body = html.unescape(re.sub(r"<[^>]+>", "", body_m.group(1))).strip() if body_m else ""
+    if body and re.match(r"^[:;,.\-–—|)\]}]", body):
+        out.append(f"متن با علامت شروع می‌شه: {body[:25]!r}")
+    if (raw or "").strip() and not body and not (profile.get("drop_text") or profile.get("fixed_caption")):
+        out.append("کپشن اصلی متن داشت ولی متن نهایی خالیه (keep_lines/strip_blocks زیادی حذف کرد؟)")
+    tags_m = re.findall(r"#(\w+)", re.sub(r"<[^>]+>", " ", caption_html.replace(FOOTER_HTML, "")))
+    bad = [t for t in tags_m if not _LATIN_TAG_RE.fullmatch(t)]
+    if bad:
+        out.append(f"هشتگ غیرلاتین توی کپشن مونده: {bad[:3]}")
+    if _u16len(html.unescape(re.sub(r"<[^>]+>", "", caption_html))) > CAPTION_LIMIT:
+        out.append("کپشن از سقف ۱۰۲۴ بیشتره")
+    return out
+
+
+def make_caption(raw: str, profile: dict):
+    """ساخت کپشن (مشترک بین ران واقعی و --preview). خروجی: (caption, continuation, why)."""
+    raw = raw or ""
+    # قانون‌های دستی هر پروفایل: "text_replace": [["regex", "جایگزین"], ...] — برای مورد غیرمنتظره بدون دست‌زدن به کد
+    for pat, repl in (profile.get("text_replace") or ()):
+        raw = re.sub(pat, repl, raw, flags=re.I | re.M)
+    continuation = None
+    if uses_profile_caption(profile):
+        caption, continuation, why = build_profile_caption(raw, profile)
+    else:
+        hashtag_html, why = dsend4.build_hashtag_caption(raw)
+        if hashtag_html is None:
+            hashtag_html = f"<blockquote>💠 #{dsend4.FALLBACK_TAG}</blockquote>"
+            why = f"هشتگ مرتبطی پیدا نشد — فالبک #{dsend4.FALLBACK_TAG}"
+        caption = build_full_caption(raw, hashtag_html)
+    return caption, continuation, why
+
+
+def safe_make_caption(raw: str, profile: dict, label: str):
+    """اگه ساخت کپشن خطا داد، کل ران نمی‌خوابه: کپشن امن (فقط هشتگ فالبک) ساخته می‌شه + هشدار."""
+    try:
+        caption, continuation, why = make_caption(raw, profile)
+    except Exception as e:
+        warn(f"{label}: ساخت کپشن خطا داد ({type(e).__name__}: {e}) — کپشن خام + #{dsend4.FALLBACK_TAG} فرستاده می‌شه")
+        tag_html = f"<blockquote>💠 #{dsend4.FALLBACK_TAG}</blockquote>"
+        try:
+            # کپشن خام اینستا (بازشونده، با سقف ۱۰۲۴) + هشتگ فالبک + فوتر
+            caption = build_full_caption(raw, f"{tag_html}\n\n{FOOTER_HTML}")
+        except Exception as e2:
+            warn(f"{label}: کپشن خام هم نشد ({type(e2).__name__}: {e2}) — فقط هشتگ + فوتر")
+            caption = f"{tag_html}\n\n{FOOTER_HTML}"
+        return caption, None, "فالبک بعد از خطا (کپشن خام)"
+    for w in lint_caption(raw, caption, profile):
+        warn(f"{label}: {w}")
+    visible = html.unescape(re.sub(r"<[^>]+>", "", caption.replace(FOOTER_HTML, ""))).strip()
+    print(f"   📝 خام  : {(raw or '')[:160]!r}")
+    print(f"   📤 نهایی: {visible[:160]!r}")
+    return caption, continuation, why
 
 
 def collect_sendable_posts(pages: list) -> list:
@@ -431,15 +524,7 @@ def collect_sendable_posts(pages: list) -> list:
                 page["last_post_taken_at"] = post["takenAt"]
                 continue
 
-            continuation = None
-            if uses_profile_caption(profile):
-                caption, continuation, why = build_profile_caption(post["caption"], profile)
-            else:
-                hashtag_html, why = dsend4.build_hashtag_caption(post["caption"])
-                if hashtag_html is None:
-                    hashtag_html = f"<blockquote>💠 #{dsend4.FALLBACK_TAG}</blockquote>"
-                    why = f"هشتگ مرتبطی پیدا نشد — فالبک #{dsend4.FALLBACK_TAG}"
-                caption = build_full_caption(post["caption"], hashtag_html)
+            caption, continuation, why = safe_make_caption(post["caption"], profile, f"{username}/{shortcode}")
             kinds = ",".join(sorted({(i.get("type") or "").lower() for i in media_items}))
             print(f'🏷️ {shortcode} [{kinds}]: {why}')
             to_send.append({"page": page, "post": post, "caption": caption, "continuation": continuation,
@@ -511,9 +596,11 @@ def schedule_all(to_send: list, chat_id: str):
             page["last_post_taken_at"] = post["takenAt"]
         except FloodWaitError as e:
             print(f"⏳ FloodWait: {e.seconds} ثانیه — توقف کل ران (state تا همینجا ثبت می‌شه)")
+            WARNINGS.append(f"FloodWait {e.seconds}s — ران زودتر متوقف شد")
             break
         except (Exception, SystemExit) as e:
             print(f"❌ زمان‌بندی {shortcode} شکست خورد ({e}) — این پیج از همینجا برای دفعه‌ی بعد retry می‌شه")
+            WARNINGS.append(f"{shortcode}: ارسال شکست خورد ({type(e).__name__}: {e})")
             # state این پست جلو نمی‌ره، ولی بقیه‌ی پیج‌ها/پست‌ها ادامه پیدا می‌کنن
         time.sleep(SCHEDULE_CALL_GAP_SECONDS)
 
@@ -525,7 +612,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pages-file", default="aninexus_pages.json")
     parser.add_argument("--chat-id", default="-1003135845875")
+    parser.add_argument("--preview", default=None,
+                        help="کپشن خام اینستا؛ بدون ارسال، فقط خروجی نهایی رو چاپ می‌کنه (نیازی به توکن نیست)")
+    parser.add_argument("--profile", default="", help="اسم پروفایل برای --preview")
     args = parser.parse_args()
+
+    if args.preview is not None:
+        prof = dsend3.resolve_profile(args.profile)
+        cap, cont, why = safe_make_caption(args.preview.replace("\\n", "\n"), prof, "preview")
+        print(f"\n🏷️ {why}\n{'─' * 40}\n{cap}")
+        if cont:
+            print(f"{'─' * 40}\n[ادامه‌ی کپشن]\n{cont}")
+        return
 
     if not APIFY_TOKEN:
         print("❌ APIFY_TOKEN تنظیم نشده")
@@ -546,6 +644,10 @@ def main():
     save_pages(args.pages_file, pages)
     git_commit_and_push(args.pages_file, "aninexus-insta: nightly check + schedule")
 
+    if WARNINGS:
+        print(f"\n⚠️ {len(WARNINGS)} هشدار توی این ران:")
+        for w in WARNINGS:
+            print(f"::warning::{w}")   # توی صفحه‌ی خلاصه‌ی Actions نمایش داده می‌شه
     print("\n✅ تمام شد")
 
 
