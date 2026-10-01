@@ -243,7 +243,13 @@ def build_full_caption(original_caption: str, hashtag_html: str) -> str:
 
 async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video_meta=None,
                          continuation_caption=None):
-    """ارسال زمان‌بندی‌شده‌ی عکس/ویدیو (تکی یا آلبوم، هر آلبوم حداکثر ۱۰ تا)."""
+    """ارسال زمان‌بندی‌شده‌ی عکس/ویدیو (تکی یا آلبوم) — همون منطق نسخه‌ی ۳:
+      • بیش از ۱۰ فایل → آلبوم‌های هم‌اندازه (هیچ‌وقت آلبوم تک‌فایلی نمی‌سازه: ۱۱ → ۶+۵)
+      • هر آلبوم ۱۰ ثانیه بعد از قبلی زمان‌بندی می‌شه تا ترتیبشون توی کانال حفظ بشه
+        (قبلاً همه با یک زمان ثابت می‌رفتن و «Continued» قبل از آلبوم اصلی منتشر می‌شد)
+      • آلبوم دارای ویدیو با مدت/ابعاد/کاور واقعی ارسال می‌شه (بدون این، جعبه‌ی سیاه/۰۰:۰۰)
+    """
+    from datetime import timedelta
     from telethon import TelegramClient
     from telethon.sessions import StringSession
     from telethon.tl.types import DocumentAttributeFilename
@@ -264,26 +270,54 @@ async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video
             kwargs = {}
             if f.lower().endswith(".mp4"):
                 attributes = [DocumentAttributeFilename(os.path.basename(f))]
-                vattr = dsend3.video_attributes(f, video_meta, thumb)
+                meta = video_meta[0] if isinstance(video_meta, (list, tuple)) and video_meta else video_meta
+                vattr = dsend3.video_attributes(f, meta if isinstance(meta, dict) else None, thumb)
                 if vattr:
                     attributes.append(vattr)
                 kwargs["attributes"] = attributes
                 if thumb:
                     kwargs["thumb"] = thumb
             sent = await client.send_file(
-                chat_value, f, caption=caption, parse_mode="html",
+                chat_value, f, caption=caption, parse_mode=dsend3.pick_parse_mode(caption),
                 supports_streaming=True, schedule=schedule_dt, **kwargs,
             )
             sent_all.extend(sent if isinstance(sent, list) else [sent])
+            return sent_all
+
+        chunks = dsend3.balanced_chunks(files, dsend3.MAX_ALBUM_SIZE)
+        vids_all = [x for x in files if x.lower().endswith(".mp4")]
+        if isinstance(video_meta, (list, tuple)) and len(video_meta) == len(vids_all):
+            meta_by_path = dict(zip(vids_all, video_meta))
+        elif isinstance(video_meta, dict) and vids_all:
+            meta_by_path = {vids_all[0]: video_meta}
         else:
-            for i in range(0, len(files), 10):
-                chunk = files[i:i + 10]
+            meta_by_path = {}
+        thumb_by_path = {vids_all[0]: thumb} if (thumb and vids_all) else {}
+        print(f"   📚 {len(files)} فایل → {len(chunks)} آلبوم: {[len(c) for c in chunks]}")
+
+        for idx, chunk in enumerate(chunks):
+            cap = caption if idx == 0 else (continuation_caption or "")
+            when = schedule_dt + timedelta(seconds=10 * idx)
+            sent = None
+            if any(x.lower().endswith(".mp4") for x in chunk):
+                try:
+                    sent = await dsend3._send_album_with_video_attrs(
+                        client, chat_value, chunk, cap, when, thumb_by_path, meta_by_path)
+                except FloodWaitError:
+                    raise
+                except Exception as e:
+                    warn(f"آلبوم {idx + 1} با مشخصات ویدیو نشد ({type(e).__name__}: {e}) — آلبوم ساده فرستاده می‌شه")
+                    sent = None
+            if not sent:
                 sent = await client.send_file(
-                    chat_value, chunk,
-                    caption=caption if i == 0 else (continuation_caption or ""),
-                    parse_mode="html", supports_streaming=True, schedule=schedule_dt,
+                    chat_value, chunk, caption=cap, parse_mode=dsend3.pick_parse_mode(cap),
+                    supports_streaming=True, schedule=when,
                 )
-                sent_all.extend(sent if isinstance(sent, list) else [sent])
+            sent = sent if isinstance(sent, list) else [sent]
+            if len(sent) != len(chunk):
+                warn(f"آلبوم {idx + 1}: {len(chunk)} فایل رفت ولی {len(sent)} پیام برگشت — آلبوم ممکنه ناقص باشه")
+            print(f"   📦 آلبوم {idx + 1}/{len(chunks)}: {len(chunk)} فایل، زمان {when.strftime('%H:%M:%S UTC')}")
+            sent_all.extend(sent)
         return sent_all
     finally:
         await client.disconnect()
@@ -583,8 +617,8 @@ def schedule_all(to_send: list, chat_id: str):
                 thumb = dsend3.prepare_thumb(post["media_items"], files)
                 # اگه فایل از instaloader اومده، متادیتای اپیفای معتبر نیست؛ video_attributes از خود فایل می‌خونه
                 if not replaced:
-                    first_video = next((i for i in post["media_items"] if (i.get("type") or "").lower() == "video"), {})
-                    video_meta = {"duration": first_video.get("duration")}
+                    video_meta = [{"duration": i.get("duration")} for i in post["media_items"]
+                                  if (i.get("type") or "").lower() == "video"]
             sent = asyncio.run(
                 send_scheduled(files, item["caption"], chat_id, when, thumb=thumb, video_meta=video_meta,
                                continuation_caption=item.get("continuation"))
