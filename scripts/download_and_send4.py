@@ -20,6 +20,8 @@ import json
 import os
 import re
 import sys
+import unicodedata
+from itertools import permutations
 
 import requests
 
@@ -90,9 +92,24 @@ URL_RE = re.compile(r'https?://\S+|www\.\S+', re.UNICODE)
 WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)  # حروف خالص (بدون رقم/زیرخط)، برای ساخت n-gram متن
 
 
+def fold_accents(s: str) -> str:
+    """حرف‌های لاتینِ اکسان‌دار → بدون اکسان ('Pokémon' → 'Pokemon'). حروف غیرلاتین (ژاپنی/چینی...) دست‌نخورده می‌مونن."""
+    s = str(s or '')
+    if s.isascii():
+        return s
+    out = []
+    for ch in s:
+        if ord(ch) < 0x250:
+            base = ''.join(c for c in unicodedata.normalize('NFKD', ch) if unicodedata.category(c) != 'Mn')
+            out.append(base or ch)
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
 def compact(s: str) -> str:
-    """کلید فشرده برای تطبیق: فقط حروف/رقم لاتین و یونیکد، حروف کوچک، بدون فاصله/علامت."""
-    return re.sub(r'[^0-9a-zA-Z\u00c0-\uffff]', '', str(s or '')).lower()
+    """کلید فشرده برای تطبیق: فقط حروف/رقم لاتین و یونیکد، حروف کوچک، بدون فاصله/علامت، بدون اکسان."""
+    return re.sub(r'[^0-9a-zA-Z\u00c0-\uffff]', '', fold_accents(s)).lower()
 
 
 def to_hashtag(name: str) -> str:
@@ -108,17 +125,34 @@ def to_hashtag(name: str) -> str:
 # بارگذاری دیکشنری — فقط یک‌بار در import
 # ─────────────────────────────────────────
 class Dictionary:
-    def __init__(self, franchise_map, char_by_franchise, char_global):
-        self.franchise_map = franchise_map            # compact_key -> canonical name
+    def __init__(self, franchise_map, char_by_franchise, char_global,
+                 franchise_display=None, weak_franchise_keys=None, name_group=None, name_words=None):
+        self.franchise_map = franchise_map            # compact_key -> canonical name (ستون franchise)
         self.franchise_sorted = sorted(franchise_map.items(), key=lambda kv: -len(kv[0]))
         self.char_by_franchise = char_by_franchise     # franchise_compact -> [(compact, canonical, seen)]
         self.char_global = char_global                 # compact -> [(canonical, franchise, seen)]
+        self.franchise_display = franchise_display or {}   # canonical (franchise) -> اسمی که توی هشتگ می‌ره (franchise_en اگه بود)
+        self.weak_franchise_keys = weak_franchise_keys or set()  # کلیدهای کوتاه/تک‌کلمه‌ای که فقط از franchise_en اومدن
+        self.name_group = name_group or {}             # کلید هر ترتیبِ ممکنِ اسم → کلید گروه (ترتیب‌بی‌اثر)
+        self.name_words = name_words or set()          # تک‌کلمه‌های اسم شخصیت‌ها (برای تشخیص «اسم ناقص»)
+
+
+# کلمه‌هایی که جزء «اسم شخصیت» حساب نمی‌شن، حتی اگه توی دیکشنری یه شخصیت با این اسم باشه
+# (برای قاعده‌ی «اسم ناقص کنار اسم کامل» — #gojo کنار #gojosatoru، ولی #onepiece کنار #onepieceart نه)
+NAME_WORD_STOPLIST = {
+    'art', 'arts', 'anime', 'fanart', 'manga', 'official', 'edit', 'edits', 'girl', 'girls', 'boy',
+    'world', 'fan', 'fans', 'wallpaper', 'cosplay', 'movie', 'series', 'ai', 'artist', 'artwork',
+}
 
 
 def load_dictionary(path: str) -> Dictionary:
     franchise_map = {}
+    franchise_display = {}
+    weak_keys = set()
     char_rows_by_franchise = {}
     char_rows_global = {}
+    name_group = {}
+    name_words = set()
 
     if not os.path.exists(path):
         print(f'⚠️ دیکشنری پیدا نشد ({path!r}) — بدون تشخیص فرنچایز/شخصیت ادامه می‌ده')
@@ -127,6 +161,7 @@ def load_dictionary(path: str) -> Dictionary:
     with open(path, encoding='utf-8-sig', newline='') as f:
         for row in csv.DictReader(f):
             franchise_name = (row.get('franchise') or '').strip()
+            franchise_en = (row.get('franchise_en') or '').strip()
             character_name = (row.get('character') or '').strip()
             try:
                 seen = int(float(row.get('seen_count') or 0))
@@ -137,6 +172,15 @@ def load_dictionary(path: str) -> Dictionary:
             if f_key and f_key not in DENY:
                 # اگه یه فرنچایز چندبار دیده بشه، همون اسم یکسانه؛ فقط اولین بار ثبت کافیه
                 franchise_map.setdefault(f_key, franchise_name)
+                if franchise_en:
+                    franchise_display.setdefault(franchise_name, franchise_en)
+                # اسم انگلیسی فرنچایز («My Dress-Up Darling») هم یه کلید تطبیق می‌شه که به همون
+                # اسم اصلی (franchise) برگرده — تا کپشن‌هایی که اسم انگلیسی نوشتن هم پیدا بشن.
+                en_key = compact(franchise_en)
+                if en_key and en_key != f_key and en_key not in DENY and en_key not in franchise_map:
+                    franchise_map[en_key] = franchise_name
+                    if ' ' not in franchise_en.strip() and len(en_key) < 7:
+                        weak_keys.add(en_key)   # تک‌کلمه‌ی کوتاه فقط از روی هشتگ قبول می‌شه، نه از متن آزاد
 
             c_key = compact(character_name)
             if not c_key or c_key in DENY:
@@ -144,6 +188,22 @@ def load_dictionary(path: str) -> Dictionary:
             is_single_word = ' ' not in character_name.strip()
             if is_single_word and seen < MIN_SEEN_SINGLE:
                 continue
+
+            words = character_name.strip().split()
+            if len(words) > 1:
+                # همه‌ی ترتیب‌های ممکنِ اسم («Natsuki Subaru» ↔ «Subaru Natsuki») یه گروه‌ان؛
+                # هم برای تطبیق متن، هم برای حذف تکرار.
+                group = ''.join(sorted(compact(w) for w in words))
+                for perm in (permutations(words) if len(words) <= 3 else [tuple(words), tuple(reversed(words))]):
+                    pk = compact(''.join(perm))
+                    if pk:
+                        name_group.setdefault(pk, group)
+                for w in words:
+                    wk = compact(w)
+                    if len(wk) >= 4 and wk not in DENY and wk not in NAME_WORD_STOPLIST and wk not in GENERIC_HASHTAGS:
+                        name_words.add(wk)
+            else:
+                name_group.setdefault(c_key, c_key)
 
             char_rows_global.setdefault(c_key, []).append((character_name, franchise_name, seen))
             if f_key:
@@ -153,14 +213,20 @@ def load_dictionary(path: str) -> Dictionary:
                 # هشتگی مثل #doflamingo (فقط نام خانوادگی، بدون کل اسم) هم پیدا بشه.
                 # این با substring دلبخواهی فرق داره (نمونه‌ی باگ Nami/dynamic):
                 # فقط کلمه‌های واقعیِ خودِ اسم به‌عنوان کلید اضافه می‌شن، نه هر زیررشته‌ای.
-                words = character_name.strip().split()
                 if len(words) > 1:
                     for w in words:
                         w_key = compact(w)
                         if w_key and w_key not in DENY and len(w_key) >= 3:
                             char_rows_by_franchise[f_key].append((w_key, character_name, seen))
+                    # ترتیب برعکس/جابه‌جا هم به همون اسم برمی‌گرده («Marin Kitagawa» → Kitagawa Marin)
+                    for perm in (permutations(words) if len(words) <= 3 else [tuple(reversed(words))]):
+                        pk = compact(''.join(perm))
+                        if pk and pk != c_key:
+                            char_rows_by_franchise[f_key].append((pk, character_name, seen))
+                            char_rows_global.setdefault(pk, []).append((character_name, franchise_name, seen))
 
-    return Dictionary(franchise_map, char_rows_by_franchise, char_rows_global)
+    return Dictionary(franchise_map, char_rows_by_franchise, char_rows_global,
+                      franchise_display, weak_keys, name_group, name_words)
 
 
 _DICT = load_dictionary(DICTIONARY_PATH)
@@ -249,7 +315,9 @@ def text_ngrams(text: str, max_n: int = 5) -> set:
 # ─────────────────────────────────────────
 # تشخیص فرنچایز
 # ─────────────────────────────────────────
-def detect_franchise(hashtags: list, ngrams: set):
+def detect_franchise(hashtags: list, ngrams: set, title_ngrams: set = None):
+    """title_ngrams: n-gramهای خط(های) اول کپشن؛ اسمی که توی عنوان اومده یه امتیاز اضافه می‌گیره
+    (برای شکستن تساوی وقتی کپشن چندفرنچایزی/چندزبانه‌ست)."""
     scores = {}  # canonical name -> امتیاز
 
     for h in hashtags:
@@ -270,8 +338,10 @@ def detect_franchise(hashtags: list, ngrams: set):
 
     for ng in ngrams:
         name = _DICT.franchise_map.get(ng)
-        if name:
+        if name and ng not in _DICT.weak_franchise_keys:
             scores[name] = scores.get(name, 0) + 1
+            if title_ngrams and ng in title_ngrams:
+                scores[name] += 1
 
     if not scores:
         return None
@@ -347,10 +417,65 @@ def detect_descriptive_tags(full_text: str) -> list:
 
 
 # ─────────────────────────────────────────
+# حذف تکرار هشتگ‌ها (مشترک بین همه‌ی مسیرها)
+# ─────────────────────────────────────────
+def _tag_key(tag: str) -> str:
+    """کلید مقایسه: بدون اکسان/علامت/حروف بزرگ، و برای اسم‌های دوکلمه‌ای ترتیب‌بی‌اثر
+    (NatsukiSubaru و SubaruNatsuki یه کلید می‌گیرن)."""
+    k = compact(tag)
+    return _DICT.name_group.get(k, k)
+
+
+def dedupe_tags(tags: list) -> list:
+    """اولین نمونه می‌مونه. سه نوع تکرار حذف می‌شه:
+      ۱) یکی‌بودن بعد از حذف اکسان/حروف بزرگ (#Pokémon و #Pokemon)
+      ۲) جابه‌جایی اسم و فامیل (#NatsukiSubaru و #SubaruNatsuki) — با کمک دیکشنری
+      ۳) اسم ناقص کنار اسم کامل (#gojo کنار #gojosatoru): هشتگ کوتاه‌تر فقط وقتی حذف می‌شه که
+         باقی‌مانده‌ی هشتگ بلندتر یکی از کلمه‌های اسم شخصیت‌ها باشه (نه هر پسوندی؛ #gojo کنار
+         #gojosupremacy می‌مونه)."""
+    out, seen = [], set()
+    for t in tags:
+        k = _tag_key(t)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(t)
+
+    keys = [compact(t) for t in out]
+    words = _DICT.name_words
+    drop = set()
+    for a, ka in enumerate(keys):
+        if len(ka) < 3:
+            continue
+        for b, kb in enumerate(keys):
+            if a == b or len(kb) <= len(ka):
+                continue
+            if kb.startswith(ka) and kb[len(ka):] in words:
+                drop.add(a)
+                break
+            if kb.endswith(ka) and kb[:-len(ka)] in words:
+                drop.add(a)
+                break
+    return [t for idx, t in enumerate(out) if idx not in drop]
+
+
+def _title_text(cleaned: str) -> str:
+    """دو خط غیرخالیِ اول کپشن (عنوان) — برای وزن‌دادن به اسمی که توی عنوان اومده."""
+    lines = [ln.strip() for ln in (cleaned or '').splitlines() if ln.strip()]
+    return ' '.join(lines[:2])
+
+
+def _format_caption(tags: list) -> str:
+    return f"<blockquote>💠 {' '.join('#' + t for t in tags)}</blockquote>"
+
+
+# ─────────────────────────────────────────
 # ساخت کپشن نهایی — یا رشته‌ی HTML، یا None (یعنی این پست رد می‌شه)
 # ─────────────────────────────────────────
-def build_hashtag_caption(original_caption: str):
-    """خروجی: (caption_html یا None, دلیل به‌صورت متن برای لاگ)"""
+def build_hashtag_caption(original_caption: str, default_hashtag: str = None):
+    """خروجی: (caption_html یا None, دلیل به‌صورت متن برای لاگ).
+    default_hashtag: اگه چیزی تشخیص داده نشد، به‌جای رد کردن پست این هشتگ می‌ره
+    (پیش‌فرض None = همون رفتار قبلی: پست رد می‌شه)."""
     cleaned = clean_text(original_caption)
     translated = translate_to_english(cleaned) if cleaned.strip() else ''
 
@@ -358,8 +483,9 @@ def build_hashtag_caption(original_caption: str):
     ngrams = text_ngrams(cleaned)
     if translated and translated.strip().lower() != cleaned.strip().lower():
         ngrams |= text_ngrams(translated)
+    title_ngrams = text_ngrams(_title_text(cleaned))
 
-    franchise = detect_franchise(hashtags, ngrams)
+    franchise = detect_franchise(hashtags, ngrams, title_ngrams)
     characters = detect_characters(hashtags, ngrams, franchise)
 
     combined_text_for_rules = ' '.join([
@@ -370,19 +496,20 @@ def build_hashtag_caption(original_caption: str):
     raw_hashtags = extract_raw_hashtag_names(original_caption)
 
     if not franchise and not characters and not descriptive and not raw_hashtags:
+        if default_hashtag:
+            return _format_caption([default_hashtag]), f'چیزی تشخیص داده نشد — هشتگ پیش‌فرض {default_hashtag}'
         return None, 'هیچ نشونه‌ی مرتبط با انیمه/کاراکتر پیدا نشد — رد شد'
 
     tags = []
-    seen_lower = set()
 
     def push(name):
         tag = to_hashtag(name)
-        if tag and tag.lower() not in seen_lower:
-            seen_lower.add(tag.lower())
+        if tag:
             tags.append(tag)
 
     if franchise:
-        push(franchise)
+        # اسم انگلیسی فرنچایز (franchise_en) اگه بود؛ وگرنه همون اسم اصلی دیکشنری
+        push(_DICT.franchise_display.get(franchise) or franchise)
     for c in characters:
         push(c)
     for d in descriptive:
@@ -390,12 +517,79 @@ def build_hashtag_caption(original_caption: str):
     for r in raw_hashtags:
         push(r)
 
+    tags = dedupe_tags(tags)
     if not tags:
-        tags = [FALLBACK_TAG]
+        tags = [default_hashtag or FALLBACK_TAG]
 
-    caption = f"<blockquote>💠 {' '.join('#' + t for t in tags)}</blockquote>"
     why = f"franchise={franchise!r} characters={characters!r} descriptive={descriptive!r} raw_hashtags={raw_hashtags!r}"
-    return caption, why
+    return _format_caption(tags), why
+
+
+# ─────────────────────────────────────────
+# کپشن بر اساس پروفایل پیج (page_profiles.py) — مسیر aniwall_insta_check
+#   hashtag_mode:
+#     (نبود)       → همون build_hashtag_caption سراسری (تشخیص با دیکشنری)
+#     'dictionary' → همون سراسری، ولی با default_hashtag (به‌جای رد شدن پستِ بی‌نشونه)
+#     'own'        → فقط هشتگ‌های خود پیج، منهای لیست‌های عمومی/ترند سراسری + قواعد پروفایل
+#     'raw'        → هشتگ‌های خود پیج کاملاً دست‌نخورده
+#   کلیدهای فقط-برای-'own': blocked_hashtags، blocked_patterns (regex روی کلید فشرده)،
+#   allowed_hashtags (از بلاک سراسری/الگویی معاف)، max_hashtags، default_hashtag
+# ─────────────────────────────────────────
+def _own_hashtags(original_caption: str, profile: dict):
+    mode = profile.get('hashtag_mode')
+    raw = HASHTAG_RE.findall(original_caption or '')
+
+    if mode == 'raw':
+        out, seen = [], set()
+        for h in raw:
+            if h.lower() in seen:
+                continue
+            seen.add(h.lower())
+            out.append(h)
+        return out, f'raw hashtags={out!r}'
+
+    blocked = {compact(b) for b in (profile.get('blocked_hashtags') or ())}
+    allowed = {compact(a) for a in (profile.get('allowed_hashtags') or ())}
+    patterns = [re.compile(p, re.I) for p in (profile.get('blocked_patterns') or ())]
+
+    kept = []
+    for h in raw:
+        k = compact(h)
+        if not k or k in blocked:
+            continue
+        if k not in allowed:
+            if k in GENERIC_HASHTAGS or k in INSTAGRAM_TREND_HASHTAGS or k in DENY:
+                continue
+            if any(p.search(k) for p in patterns):
+                continue
+        tag = to_hashtag(h)
+        if tag:
+            kept.append(tag)
+
+    kept = dedupe_tags(kept)
+    cap = profile.get('max_hashtags')
+    if cap:
+        kept = kept[:int(cap)]
+    return kept, f'own hashtags={kept!r}'
+
+
+def build_caption_for_profile(original_caption: str, profile: dict = None):
+    """خروجی مثل build_hashtag_caption: (caption_html یا None, دلیل)."""
+    profile = profile or {}
+    mode = profile.get('hashtag_mode')
+    default_tag = profile.get('default_hashtag')
+
+    if mode in ('own', 'raw'):
+        tags, why = _own_hashtags(original_caption, profile)
+        if not tags:
+            if default_tag:
+                return _format_caption([default_tag]), f'{why} — بعد از پاک‌سازی چیزی نموند، هشتگ پیش‌فرض {default_tag}'
+            return None, f'{why} — بعد از پاک‌سازی چیزی نموند — رد شد'
+        if mode == 'raw':
+            return _format_caption(tags), why
+        return _format_caption(tags), why
+
+    return build_hashtag_caption(original_caption, default_hashtag=default_tag)
 
 
 # ─────────────────────────────────────────

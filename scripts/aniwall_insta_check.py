@@ -12,6 +12,12 @@ aniwall_insta_check.py — چک شبانه‌ی پیج‌های اینستاگر
      باشی قبل از هر انتشار، از بخش Scheduled Messages تلگرام پست‌ها رو ببینی
      و در صورت نیاز دخالت کنی.
 
+پروفایل پیج‌ها (scripts/page_profiles.py):
+  هر پیج توی aniwall_pages.json می‌تونه کلید "profile" داشته باشه (مثلاً "deminiart") تا
+  هشتگ‌های کپشنش با قواعد اختصاصی ساخته بشه. پیج بدون "profile" دقیقاً مثل قبل (تشخیص سراسری
+  با دیکشنری) کار می‌کنه. اسم پروفایلی که تعریف نشده باشه = خطا؛ اون پیج اجرا نمی‌شه و state
+  دست‌نخورده می‌مونه.
+
 تریگر این اسکریپت کاملاً دستیه (نه cron) — خود کاربر هر شب ساعت ۱۲ صداش می‌زنه.
 
 هیچ منطق دانلود/ورد نویسی از صفر نیست: از download_and_send3.py (دانلود،
@@ -185,7 +191,13 @@ def collect_posts(pages: list) -> list:
     entries = []
     for page in pages:
         username = page["username"]
-        print(f"\n━━━ چک پیج: {username} ━━━")
+        profile_name = (page.get("profile") or "").strip()
+        print(f"\n━━━ چک پیج: {username} (profile={profile_name or 'default'}) ━━━")
+        try:
+            profile = dsend3.resolve_profile(profile_name)
+        except KeyError as e:
+            print(f"❌ {e} — پیج رد شد، state دست‌نخورده می‌مونه")
+            continue
         try:
             new_posts = fetch_new_posts(page)
         except Exception as e:
@@ -209,7 +221,7 @@ def collect_posts(pages: list) -> list:
                 entries.append({"page": page, "post": post, "caption": None, "why": "پست ویدیوئه"})
                 continue
 
-            caption, why = dsend4.build_hashtag_caption(post["caption"])
+            caption, why = dsend4.build_caption_for_profile(post["caption"], profile)
             if caption is None:
                 entries.append({"page": page, "post": post, "caption": None, "why": why})
                 continue

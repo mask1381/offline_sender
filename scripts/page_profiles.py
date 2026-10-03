@@ -30,6 +30,18 @@
   (کلیدهای پروفایل‌های ANINEXUS — keep_lines, own_hashtags, raw_caption, drop_text, blocked_hashtags,
    extra_hashtags, fixed_caption, continuation_caption — توضیحشون بالای همون پروفایل‌هاست)
 
+  (کلیدهای پروفایل‌های ANIWALL — فقط توی aniwall_insta_check.py، برای ساخت کپشنِ «فقط هشتگ»:)
+  hashtag_mode          : 'own' = فقط هشتگ‌های خود پیج، منهای لیست‌های عمومی/ترند سراسری و قواعد همین پروفایل
+                          'raw' = هشتگ‌های خود پیج کاملاً دست‌نخورده
+                          'dictionary' = تشخیص با دیکشنری از روی متن (برای پیج‌های بدون هشتگ)
+                          (نبود) = همون تشخیص سراسری download_and_send4.py
+  blocked_hashtags      : (همون کلید ANINEXUS) نام‌های حذفی، حروف کوچک/بدون # ؛ زیرخط و نقطه مهم نیست
+  blocked_patterns      : لیست regex روی کلید فشرده‌ی هشتگ (حروف کوچک، بدون علامت) — هر هشتگی که بخوره حذف می‌شه
+  allowed_hashtags      : هشتگ‌هایی که از لیست‌های سراسری و blocked_patterns معاف‌ان (blocked_hashtags اولویت داره)
+  max_hashtags          : سقف تعداد هشتگ؛ به ترتیب ظاهر شدن توی کپشن (نبود = بدون سقف)
+  default_hashtag       : اگه بعد از پاک‌سازی چیزی نموند این هشتگ می‌ره (نبود = پست رد می‌شه)
+  در حالت 'own' حذف تکرارِ اسم (ترتیب اسم/فامیل، اکسان، اسم ناقص کنار اسم کامل) همیشه اعمال می‌شه.
+
 قالب هر قاعده (همون TEXT_RULES در download_and_send3.py):
   {'kind': 'LEAK', 'video': True|False, 'patterns': [('title'|'text', r'regex'), ...]}
   ترتیب مهمه؛ اولین قاعده‌ای که بخوره برنده‌ست.
@@ -134,5 +146,109 @@ PROFILES = {
         'split_title': False,
         'fixed_caption': '#Anime #AnimeSpotlight',
         'continuation_caption': '↪️ Continued from the previous album',
+    },
+
+    # ───────── پیج‌های ANIWALL (aniwall_pages.json) ─────────
+    # کپشن همه‌شون فقط هشتگه (بلوک blockquote)؛ متن اصلی پست هیچ‌وقت وارد کپشن نمی‌شه.
+    # پیج‌های framezeroo و pixeldestiny_ عمداً پروفایل ندارن = رفتار سراسری.
+
+    # فقط هشتگ‌های خود پیج، منهای لیست‌های عمومی/ترند سراسری.
+    'art_lab_anime': {
+        'hashtag_mode': 'own',
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # تبلیغ ابزارها (kusart/kusapics/plotparty/openart) و هم‌معنی‌ها حذف؛ سقف ۶.
+    'anime_aiverse8': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': [
+            'demonslayerfanart', 'kimetsunoyaiba', 'hashira', 'shinobi', 'infinitycastle',
+            'kusart', 'kusapics', 'kusapics_neko', 'plotparty', 'openart',
+        ],
+        'max_hashtags': 6,
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # هشتگ‌های fyp و خراب (حرف غیرلاتین) و برند پیج حذف؛ اگه چیزی نموند #AnimeArt.
+    'citseven7': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['fypp', 'illustration', 'digitalillustration', 'cit7creations'],
+        'blocked_patterns': [r'^fyp', r'[^a-z0-9]'],
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # هر هشتگی که به art/fanart ختم بشه حذف؛ سقف ۶.
+    'tsukoon.art': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['animeartist', 'tsudynamicshot', 'limelightai', 'will'],
+        'blocked_patterns': [r'fanart$', r'art$'],
+        'max_hashtags': 6,
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # هشتگ‌های خود پیج کاملاً دست‌نخورده (بدون حذف عمومی‌ها، بدون سقف).
+    'redknight.wallpapers': {
+        'hashtag_mode': 'raw',
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # قواعد الگویی مشترکِ پیج‌های پرهشتگ (deminiart / shae_aiz / ani.wonderz)
+    'deminiart': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['kimetsunoyaiba', 'journey', 'ashandpikachu', 'jjk', 'posterdesign'],
+        'blocked_patterns': [
+            r'anime', r'wallpaper', r'aesthetic', r'community', r'edit', r'fans', r'fandom',
+            r'vibes', r'daily', r'world', r'(art|arts|artist|artwork)$', r'viral', r'trending',
+            r'^ai(?=art|anime|wallpaper|digital|generated|image|gallery|creat)',
+        ],
+        'max_hashtags': 6,
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # بدون هشتگ؛ فرنچایز/شخصیت از روی متن (چندزبانه) با دیکشنری؛ اگه چیزی پیدا نشد #AnimeArt.
+    'sheep_dream_studio': {
+        'hashtag_mode': 'dictionary',
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # بدون سقف (به درخواست کاربر).
+    'shae_aiz': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['artiteks', 'jjk', 'jujutsukaisenart', 'kingofcurses', 'jujutsusorcerer'],
+        'blocked_patterns': [
+            r'anime', r'wallpaper', r'aesthetic', r'community', r'edit', r'fans', r'fandom',
+            r'vibes', r'daily', r'world', r'(art|arts|artist|artwork)$', r'viral', r'trending',
+            r'^ai(?=art|anime|wallpaper|digital|generated|image|gallery|creat)',
+        ],
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # هشتگ‌های تبلیغ ابزار حذف؛ #AnimeGirls مجازه (قاعده‌ی «anime» ندارد)؛ #mikasha غلط املایی Mikasa.
+    'ai_anime_3.o': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['flowwallai', 'syntxai', 'syntx_creators', 'imagineartofficial', 'aot', 'mikasha'],
+        'max_hashtags': 6,
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # بلوک ثابتِ انتهای هر پست (anime/animecommunity/midjourneyai/...) حذف؛ سقف ۶.
+    'ai_art_infinity': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['animecommunity', 'animeai', 'animeedits', 'aiartcommunity', 'midjourneyai'],
+        'max_hashtags': 6,
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # هشتگ‌های برند پیج حذف + همان قواعد الگویی deminiart؛ سقف ۶.
+    'ani.wonderz': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['aniwonderz', 'aniaiart', 'aeoncollabs'],
+        'blocked_patterns': [
+            r'anime', r'wallpaper', r'aesthetic', r'community', r'edit', r'fans', r'fandom',
+            r'vibes', r'daily', r'world', r'(art|arts|artist|artwork)$', r'viral', r'trending',
+            r'^ai(?=art|anime|wallpaper|digital|generated|image|gallery|creat)',
+        ],
+        'max_hashtags': 6,
+        'default_hashtag': 'AnimeArt',
     },
 }
