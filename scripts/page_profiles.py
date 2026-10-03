@@ -74,7 +74,6 @@ PROFILES = {
         'drop_min_items': 5,
         'crop_bottom_pct': 10,
         'schedule_delay_min': 60,
-        'split_title': False,
         'redundant_tags': {'genshin': 'genshinimpact'},
         'strip_blocks': [
             r'^[^\w\n]*cover\s*art\b',           # ✦ Cover Art + لینک pixiv
@@ -89,14 +88,16 @@ PROFILES = {
     # خط اعتبار «Via ...» هیچ‌وقت با کوتاه‌سازی حذف نمی‌شه؛ اسم شخصیت‌ها هشتگ می‌شن؛
     # ۹۰ دقیقه بعد منتشر می‌شه (steambird ۶۰ دقیقه) تا دو پیج با هم قاطی نشن.
     'gensh1nuniverse': {
-        'text_rules': [],
-        'unmatched_non_video': 'LEAK',
-        'video_fallback': 'LEAK',
-        'schedule_delay_min': 90,
-        'split_title': False,
-        'protect_blocks': [r'^\s*via\b'],
-        'character_tags': 'Genshin Impact',
-    },
+        'text_rules': [
+          {'kind': 'LEAK', 'video': True,
+           'patterns': [('text', r'(?m)^[^\w\n]*(?:via|source)\b')]},
+    ],
+    'unmatched_non_video': 'LEAK',
+    # video_fallback حذف شد → ویدیوی بدون Via/Source می‌ره سراغ قاعده‌ی مدت (Clip/Demo/Trailer)
+    'schedule_delay_min': 90,
+    'protect_blocks': [r'^\s*via\b'],
+    'character_tags': 'Genshin Impact',
+},
 
     # ───────── پیج‌های ANINEXUS (aninexus_pages.json) ─────────
     # فعلاً خالی = رفتار سراسری؛ قواعد هر پیج بعد از تعیین اینجا پر می‌شه.
