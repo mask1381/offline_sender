@@ -83,7 +83,7 @@ INSTAGRAM_TREND_HASHTAGS = {
     'algorithm', 'newpost', 'dailypost', 'contentcreator', 'creatorsoninstagram',
     'artistsoninstagram', 'supportsmallartists', 'smallartist', 'like', 'likes',
     'comment', 'comments', 'subscribe', 'follownow','openart','jjk','cozyart','creativeai','aidigitalart','aiartcommunity','aiartgallery','fyppage',
-    'animecommunity','mangaart','viralart','trendingwallpaper','deminiart','digitalanime','animeedit','ai','pageone','aiedit','Mujoai',
+    'animecommunity','mangaart','viralart','trendingwallpaper','deminiart','digitalanime','animeedit','ai','pageone','aiedit',
 }
 
 HASHTAG_RE = re.compile(r'#(\w+)', re.UNICODE)
@@ -426,26 +426,30 @@ def _tag_key(tag: str) -> str:
     return _DICT.name_group.get(k, k)
 
 
-def dedupe_tags(tags: list) -> list:
+def dedupe_tags(tags: list, protect: int = 0) -> list:
     """اولین نمونه می‌مونه. سه نوع تکرار حذف می‌شه:
       ۱) یکی‌بودن بعد از حذف اکسان/حروف بزرگ (#Pokémon و #Pokemon)
       ۲) جابه‌جایی اسم و فامیل (#NatsukiSubaru و #SubaruNatsuki) — با کمک دیکشنری
       ۳) اسم ناقص کنار اسم کامل (#gojo کنار #gojosatoru): هشتگ کوتاه‌تر فقط وقتی حذف می‌شه که
          باقی‌مانده‌ی هشتگ بلندتر یکی از کلمه‌های اسم شخصیت‌ها باشه (نه هر پسوندی؛ #gojo کنار
-         #gojosupremacy می‌مونه)."""
-    out, seen = [], set()
-    for t in tags:
+         #gojosupremacy می‌مونه).
+      ۴) هشتگ ترکیبی: فقط چسباندنِ دو هشتگ دیگرِ همین پست (#ryukdeathnote = #ryuk + #deathnote)
+    protect: تعداد تگ‌های اولِ لیست (فرنچایز/شخصیتِ تشخیص‌داده‌شده) که قواعد ۳ و ۴ هیچ‌وقت حذفشون نمی‌کنن."""
+    out, seen, orig_idx = [], set(), []
+    for i, t in enumerate(tags):
         k = _tag_key(t)
         if not k or k in seen:
             continue
         seen.add(k)
         out.append(t)
+        orig_idx.append(i)
+    protected = {n for n, i in enumerate(orig_idx) if i < protect}
 
     keys = [compact(t) for t in out]
     words = _DICT.name_words
     drop = set()
     for a, ka in enumerate(keys):
-        if len(ka) < 3:
+        if len(ka) < 3 or a in protected:
             continue
         for b, kb in enumerate(keys):
             if a == b or len(kb) <= len(ka):
@@ -455,6 +459,21 @@ def dedupe_tags(tags: list) -> list:
                 break
             if kb.endswith(ka) and kb[:-len(ka)] in words:
                 drop.add(a)
+                break
+
+    # ۴) هشتگِ ترکیبی: فقط چسباندنِ دو هشتگ دیگرِ همین پست (#ryukdeathnote = #ryuk + #deathnote).
+    #    همیشه خودِ ترکیبی حذف می‌شه، نه اجزاش.
+    for c, kc in enumerate(keys):
+        if c in protected:
+            continue
+        for a, ka in enumerate(keys):
+            if len(ka) < 3 or a == c or not kc.startswith(ka):
+                continue
+            rest = kc[len(ka):]
+            if len(rest) < 3:
+                continue
+            if any(b not in (a, c) and keys[b] == rest for b in range(len(keys))):
+                drop.add(c)
                 break
     return [t for idx, t in enumerate(out) if idx not in drop]
 
@@ -514,10 +533,11 @@ def build_hashtag_caption(original_caption: str, default_hashtag: str = None):
         push(c)
     for d in descriptive:
         push(d)
+    protect = len(tags)   # فرنچایز/شخصیت/توصیفیِ تشخیص‌داده‌شده با قواعد «ناقص/ترکیبی» حذف نمی‌شن
     for r in raw_hashtags:
         push(r)
 
-    tags = dedupe_tags(tags)
+    tags = dedupe_tags(tags, protect=protect)
     if not tags:
         tags = [default_hashtag or FALLBACK_TAG]
 
