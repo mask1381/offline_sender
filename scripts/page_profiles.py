@@ -88,9 +88,9 @@ PROFILES = {
     # خط اعتبار «Via ...» هیچ‌وقت با کوتاه‌سازی حذف نمی‌شه؛ اسم شخصیت‌ها هشتگ می‌شن؛
     # ۹۰ دقیقه بعد منتشر می‌شه (steambird ۶۰ دقیقه) تا دو پیج با هم قاطی نشن.
     'gensh1nuniverse': {
-        'text_rules': [
-          {'kind': 'LEAK', 'video': True,
-           'patterns': [('text', r'(?m)^[^\w\n]*(?:via|source)\b')]},
+    'text_rules': [
+        {'kind': 'LEAK', 'video': True,
+         'patterns': [('text', r'(?m)^[^\w\n]*(?:via|source)\b')]},
     ],
     'unmatched_non_video': 'LEAK',
     # video_fallback حذف شد → ویدیوی بدون Via/Source می‌ره سراغ قاعده‌ی مدت (Clip/Demo/Trailer)
@@ -151,7 +151,7 @@ PROFILES = {
 
     # ───────── پیج‌های ANIWALL (aniwall_pages.json) ─────────
     # کپشن همه‌شون فقط هشتگه (بلوک blockquote)؛ متن اصلی پست هیچ‌وقت وارد کپشن نمی‌شه.
-    # پیج‌های framezeroo و pixeldestiny_ عمداً پروفایل ندارن = رفتار سراسری.
+    # پیج pixeldestiny_ عمداً پروفایل نداره = رفتار سراسری.
 
     # فقط هشتگ‌های خود پیج، منهای لیست‌های عمومی/ترند سراسری.
     'art_lab_anime': {
@@ -227,7 +227,7 @@ PROFILES = {
     # هشتگ‌های تبلیغ ابزار حذف؛ #AnimeGirls مجازه (قاعده‌ی «anime» ندارد)؛ #mikasha غلط املایی Mikasa.
     'ai_anime_3.o': {
         'hashtag_mode': 'own',
-        'blocked_hashtags': ['flowwallai', 'syntxai', 'syntx_creators', 'imagineartofficial', 'aot', 'mikasha'],
+        'blocked_hashtags': ['flowwallai', 'syntxai', 'syntx_creators', 'imagineartofficial', 'mujoai', 'aot', 'mikasha'],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
     },
@@ -236,6 +236,15 @@ PROFILES = {
     'ai_art_infinity': {
         'hashtag_mode': 'own',
         'blocked_hashtags': ['animecommunity', 'animeai', 'animeedits', 'aiartcommunity', 'midjourneyai'],
+        'max_hashtags': 6,
+        'default_hashtag': 'AnimeArt',
+    },
+
+    # ابزارهای تولید (midjourney/photoshop) و هشتگ‌های ختم‌شونده به art/arts/artist حذف؛ سقف ۶.
+    'framezeroo': {
+        'hashtag_mode': 'own',
+        'blocked_hashtags': ['midjourney', 'photoshop', 'nature'],
+        'blocked_patterns': [r'(art|arts|artist|artwork)$'],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
     },
