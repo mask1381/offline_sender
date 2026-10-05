@@ -32,8 +32,8 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
-
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import requests
 from telethon.errors import FloodWaitError
 
@@ -266,17 +266,64 @@ def advance_state(page: dict, post: dict):
     page["last_post_id"] = post["shortcode"]
     page["last_post_taken_at"] = post["takenAt"]
 
+# ─────────────────────────────────────────
+# زمان‌بندی بر اساس ساعت هر پیج (post_hour توی پروفایل، به وقت تهران)
+# ─────────────────────────────────────────
+TEHRAN = ZoneInfo("Asia/Tehran")
+POST_GAP_MIN = 10          # فاصله‌ی پست‌های پشت‌سرهم (هر پیج و بین پیج‌ها)
+MIN_LEAD_MIN = 90          # حداقل فاصله‌ی اولین پست تا لحظه‌ی اجرا
+RUN_HOURS = {0, 4, 8, 12, 16, 20}   # ساعت‌های ران کانال (دقیقه ۰)
 
+
+def _hour_of(entry):
+    prof = dsend3.resolve_profile((entry["page"].get("profile") or "").strip())
+    h = prof.get("post_hour")
+    return int(h) if h is not None else None
+
+
+def _reserve(t, used):
+    """اگه کمتر از POST_GAP_MIN با پست دیگه‌ای فاصله داشت، جلو می‌بره."""
+    gap = timedelta(minutes=POST_GAP_MIN)
+    while any(abs(t - u) < gap for u in used):
+        t += gap
+    used.append(t)
+    return t
+
+
+def compute_times(send_entries, now):
+    """خروجی: لیست زمان UTC هم‌ترتیب send_entries."""
+    now_teh = now.astimezone(TEHRAN)
+    n_fallback = sum(1 for e in send_entries if _hour_of(e) is None)
+    fallback = iter(dsend4.compute_schedule_times(now, n_fallback))
+    used, times = [], []
+    for e in send_entries:
+        name, sc = e["page"]["username"], e["post"]["shortcode"]
+        hour = _hour_of(e)
+        if hour is None:
+            t = next(fallback)
+            print(f"ℹ️ {name}: post_hour ندارد — پخش خودکار")
+        else:
+            if not 0 <= hour <= 23:
+                raise ValueError(f"post_hour نامعتبر برای {name}: {hour}")
+            base = now_teh.replace(hour=hour, minute=0, second=0, microsecond=0)
+            while base < now_teh + timedelta(minutes=MIN_LEAD_MIN):
+                base += timedelta(days=1)
+            t = _reserve(base, used)
+            local = t.astimezone(TEHRAN)
+            if local.hour in RUN_HOURS or (((local.hour + 1) % 24) in RUN_HOURS and local.minute >= 45):
+                print(f"⚠️ {name}/{sc}: زمان {local:%H:%M} با ران کانال تداخل دارد")
+        times.append(t.astimezone(timezone.utc))
+    return times
 def schedule_all(plan: list, chat_id: str, pages: list, pages_file: str):
     send_entries = [e for e in plan if e["caption"] is not None]
     if not send_entries:
         print("\nℹ️ هیچ پستی برای زمان‌بندی نبود")
-    now = datetime.now(timezone.utc)
-    times = dsend4.compute_schedule_times(now, len(send_entries))
+      now = datetime.now(timezone.utc)
+    times = compute_times(send_entries, now)
     if times:
         print(f"\n🗓️ {len(send_entries)} پست، زمان‌بندی بین "
-              f"{times[0].strftime('%H:%M UTC')} تا {times[-1].strftime('%H:%M UTC')}")
-    times_iter = iter(times)
+              f"{min(times).strftime('%H:%M UTC')} تا {max(times).strftime('%H:%M UTC')}")
+    when_by_entry = {id(e): t for e, t in zip(send_entries, times)}
 
     failed_pages = set()
     for e in plan:
@@ -294,7 +341,7 @@ def schedule_all(plan: list, chat_id: str, pages: list, pages_file: str):
             advance_state(page, post)
             continue
 
-        when = next(times_iter)
+        when = when_by_entry[id(e)]
         try:
             reset_workdir()
             files = dsend3.download_media_direct(post["media_items"])
