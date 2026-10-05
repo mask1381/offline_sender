@@ -34,6 +34,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+
 import requests
 from telethon.errors import FloodWaitError
 
@@ -318,7 +319,7 @@ def schedule_all(plan: list, chat_id: str, pages: list, pages_file: str):
     send_entries = [e for e in plan if e["caption"] is not None]
     if not send_entries:
         print("\nℹ️ هیچ پستی برای زمان‌بندی نبود")
-      now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
     times = compute_times(send_entries, now)
     if times:
         print(f"\n🗓️ {len(send_entries)} پست، زمان‌بندی بین "
