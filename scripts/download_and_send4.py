@@ -594,7 +594,25 @@ def _own_hashtags(original_caption: str, profile: dict):
 
 
 def _build_caption_base(original_caption: str, profile: dict = None):
-    def _apply_fixed_tags(caption, fixed):
+    """خروجی مثل build_hashtag_caption: (caption_html یا None, دلیل)."""
+    profile = profile or {}
+    mode = profile.get('hashtag_mode')
+    default_tag = profile.get('default_hashtag')
+
+    if mode in ('own', 'raw'):
+        tags, why = _own_hashtags(original_caption, profile)
+        if not tags:
+            if default_tag:
+                return _format_caption([default_tag]), f'{why} — بعد از پاک‌سازی چیزی نموند، هشتگ پیش‌فرض {default_tag}'
+            return None, f'{why} — بعد از پاک‌سازی چیزی نموند — رد شد'
+        if mode == 'raw':
+            return _format_caption(tags), why
+        return _format_caption(tags), why
+
+    return build_hashtag_caption(original_caption, default_hashtag=default_tag)
+
+
+def _apply_fixed_tags(caption, fixed):
     """هشتگ‌های ثابت پیج رو آخر بلوک هشتگ اضافه می‌کنه (تکراری‌ها حذف)."""
     fixed = [re.sub(r'[^0-9a-zA-Z\u00c0-\uffff]', '', str(t)) for t in (fixed or ())]
     fixed = [t for t in fixed if t]
@@ -623,22 +641,6 @@ def build_caption_for_profile(original_caption: str, profile: dict = None):
         caption = _apply_fixed_tags(caption, fixed)
         why += f' + fixed={list(fixed)!r}'
     return caption, why
-    """خروجی مثل build_hashtag_caption: (caption_html یا None, دلیل)."""
-    profile = profile or {}
-    mode = profile.get('hashtag_mode')
-    default_tag = profile.get('default_hashtag')
-
-    if mode in ('own', 'raw'):
-        tags, why = _own_hashtags(original_caption, profile)
-        if not tags:
-            if default_tag:
-                return _format_caption([default_tag]), f'{why} — بعد از پاک‌سازی چیزی نموند، هشتگ پیش‌فرض {default_tag}'
-            return None, f'{why} — بعد از پاک‌سازی چیزی نموند — رد شد'
-        if mode == 'raw':
-            return _format_caption(tags), why
-        return _format_caption(tags), why
-
-    return build_hashtag_caption(original_caption, default_hashtag=default_tag)
 
 
 # ─────────────────────────────────────────
