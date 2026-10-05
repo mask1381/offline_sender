@@ -593,7 +593,36 @@ def _own_hashtags(original_caption: str, profile: dict):
     return kept, f'own hashtags={kept!r}'
 
 
+def _build_caption_base(original_caption: str, profile: dict = None):
+def _apply_fixed_tags(caption, fixed):
+    """هشتگ‌های ثابت پیج رو آخر بلوک هشتگ اضافه می‌کنه (تکراری‌ها حذف)."""
+    fixed = [re.sub(r'[^0-9a-zA-Z\u00c0-\uffff]', '', str(t)) for t in (fixed or ())]
+    fixed = [t for t in fixed if t]
+    if not fixed:
+        return caption
+    existing = []
+    if caption:
+        m = re.match(r'<blockquote>💠 (.*)</blockquote>\s*$', caption, re.S)
+        if not m:
+            return caption
+        existing = [t.lstrip('#') for t in m.group(1).split()]
+    seen = {compact(t) for t in existing}
+    for t in fixed:
+        if compact(t) not in seen:
+            seen.add(compact(t))
+            existing.append(t)
+    return _format_caption(existing)
+
+
 def build_caption_for_profile(original_caption: str, profile: dict = None):
+    """خروجی: (caption_html یا None, دلیل). fixed_hashtags پروفایل آخر کار اضافه می‌شه."""
+    profile = profile or {}
+    caption, why = _build_caption_base(original_caption, profile)
+    fixed = profile.get('fixed_hashtags')
+    if fixed:
+        caption = _apply_fixed_tags(caption, fixed)
+        why += f' + fixed={list(fixed)!r}'
+    return caption, why
     """خروجی مثل build_hashtag_caption: (caption_html یا None, دلیل)."""
     profile = profile or {}
     mode = profile.get('hashtag_mode')
