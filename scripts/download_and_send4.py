@@ -594,7 +594,7 @@ def _own_hashtags(original_caption: str, profile: dict):
 
 
 def _build_caption_base(original_caption: str, profile: dict = None):
-def _apply_fixed_tags(caption, fixed):
+    def _apply_fixed_tags(caption, fixed):
     """هشتگ‌های ثابت پیج رو آخر بلوک هشتگ اضافه می‌کنه (تکراری‌ها حذف)."""
     fixed = [re.sub(r'[^0-9a-zA-Z\u00c0-\uffff]', '', str(t)) for t in (fixed or ())]
     fixed = [t for t in fixed if t]
