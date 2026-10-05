@@ -157,6 +157,8 @@ PROFILES = {
     'art_lab_anime': {
         'hashtag_mode': 'own',
         'default_hashtag': 'AnimeArt',
+        'post_hour': 22,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['Unco'],   # اختیاری
     },
 
     # تبلیغ ابزارها (kusart/kusapics/plotparty/openart) و هم‌معنی‌ها حذف؛ سقف ۶.
@@ -168,16 +170,19 @@ PROFILES = {
         ],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
+        'post_hour': 18,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['Aesthetic'],   # اختیاری
     },
 
     # هشتگ‌های fyp و خراب (حرف غیرلاتین) و برند پیج حذف؛ اگه چیزی نموند #AnimeArt.
     'citseven7': {
         'hashtag_mode': 'own',
-        'blocked_hashtags': ['fypp', 'illustration', 'digitalillustration', 'cit7creations'],
+        'blocked_hashtags': ['fypp', 'illustration', 'digitalillustration', 'cit7creations','crossover'],
         'blocked_patterns': [r'^fyp', r'[^a-z0-9]'],
         'default_hashtag': 'AnimeArt',
+        'post_hour': 5,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['crossover'],   # اختیاری
     },
-
     # هر هشتگی که به art/fanart ختم بشه حذف؛ سقف ۶.
     'tsukoon.art': {
         'hashtag_mode': 'own',
@@ -185,12 +190,15 @@ PROFILES = {
         'blocked_patterns': [r'fanart$', r'art$'],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
+        'post_hour': 10,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['illustration'],   # اختیاری
     },
 
     # هشتگ‌های خود پیج کاملاً دست‌نخورده (بدون حذف عمومی‌ها، بدون سقف).
     'redknight.wallpapers': {
         'hashtag_mode': 'raw',
         'default_hashtag': 'AnimeArt',
+        'post_hour': 14,                  # ساعت تهران، یکی از ساعت‌های خالی
     },
 
     # قواعد الگویی مشترکِ پیج‌های پرهشتگ (deminiart / shae_aiz / ani.wonderz)
@@ -204,24 +212,15 @@ PROFILES = {
         ],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
+        'post_hour': 19, 
     },
 
     # بدون هشتگ؛ فرنچایز/شخصیت از روی متن (چندزبانه) با دیکشنری؛ اگه چیزی پیدا نشد #AnimeArt.
     'sheep_dream_studio': {
         'hashtag_mode': 'dictionary',
         'default_hashtag': 'AnimeArt',
-    },
-
-    # بدون سقف (به درخواست کاربر).
-    'shae_aiz': {
-        'hashtag_mode': 'own',
-        'blocked_hashtags': ['artiteks', 'jjk', 'jujutsukaisenart', 'kingofcurses', 'jujutsusorcerer'],
-        'blocked_patterns': [
-            r'anime', r'wallpaper', r'aesthetic', r'community', r'edit', r'fans', r'fandom',
-            r'vibes', r'daily', r'world', r'(art|arts|artist|artwork)$', r'viral', r'trending',
-            r'^ai(?=art|anime|wallpaper|digital|generated|image|gallery|creat)',
-        ],
-        'default_hashtag': 'AnimeArt',
+        'post_hour': 13,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['Trendy'],
     },
 
     # هشتگ‌های تبلیغ ابزار حذف؛ #AnimeGirls مجازه (قاعده‌ی «anime» ندارد)؛ #mikasha غلط املایی Mikasa.
@@ -230,6 +229,8 @@ PROFILES = {
         'blocked_hashtags': ['flowwallai', 'syntxai', 'syntx_creators', 'imagineartofficial', 'mujoai', 'aot', 'mikasha'],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
+        'post_hour': 21,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['Solo'], 
     },
 
     # بلوک ثابتِ انتهای هر پست (anime/animecommunity/midjourneyai/...) حذف؛ سقف ۶.
@@ -238,6 +239,8 @@ PROFILES = {
         'blocked_hashtags': ['animecommunity', 'animeai', 'animeedits', 'aiartcommunity', 'midjourneyai'],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
+        'post_hour': 3,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['Hype'], 
     },
 
     # ابزارهای تولید (midjourney/photoshop) و هشتگ‌های ختم‌شونده به art/arts/artist حذف؛ سقف ۶.
@@ -247,6 +250,11 @@ PROFILES = {
         'blocked_patterns': [r'(art|arts|artist|artwork)$'],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
+        'post_hour': 9,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['Solo'], 
+    },
+    'pixeldestiny_': {
+        'post_hour': 6,
     },
 
     # هشتگ‌های برند پیج حذف + همان قواعد الگویی deminiart؛ سقف ۶.
@@ -260,5 +268,7 @@ PROFILES = {
         ],
         'max_hashtags': 6,
         'default_hashtag': 'AnimeArt',
+        'post_hour': 17,                  # ساعت تهران، یکی از ساعت‌های خالی
+        'fixed_hashtags': ['illustration'], 
     },
 }
