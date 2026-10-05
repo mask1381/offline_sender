@@ -65,6 +65,25 @@ def _visible_len(html_text: str) -> int:
     plain = html.unescape(re.sub(r'<[^>]+>', '', html_text))
     return len(plain.encode('utf-16-le')) // 2
 
+_GAME_NAMES = ('Genshin Impact', 'Wuthering Waves')
+_GAME_SUFFIX_RE = re.compile(
+    r'(?:\s*[|｜]|\s+[-–—])\s*(?:' + '|'.join(re.escape(n) for n in _GAME_NAMES) + r')\s*$',
+    re.I,
+)
+
+
+def strip_game_suffix(text: str) -> str:
+    out = text
+    while True:
+        new = _GAME_SUFFIX_RE.sub('', out).rstrip()
+        if new == out:
+            break
+        out = new
+    return out or text
+
+
+def strip_game_suffix_lines(body: str) -> str:
+    return '\n'.join(strip_game_suffix(ln) if ln.strip() else ln for ln in body.split('\n'))
 
 def build_caption(original_caption: str) -> str:
     """کپشن از n8n به‌صورت HTML آماده می‌رسه (Build Final Caption) و دست‌نخورده می‌ره.
@@ -639,6 +658,8 @@ def build_channel_caption(kind: str, original_caption: str, tags: list, post_url
         protected = '\n\n'.join(x for x in paras if any(r.search(x) for r in pregs))
         body = '\n\n'.join(x for x in paras if not any(r.search(x) for r in pregs))
     # bi اول، escape بعد (وگرنه &amp; هم bold-italic می‌شد و خراب می‌شد)
+    title = strip_game_suffix(title) if title else title
+    body = strip_game_suffix_lines(body) if body else body
     title_part = f'<b>{html.escape(bi(title), quote=False)}</b>\n\n' if title else ''
 
     type_tag = '#' + t['tag']
