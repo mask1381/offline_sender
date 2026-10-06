@@ -126,8 +126,7 @@ PROFILES = {
               r'^[^\w\n]*(reliable|↠)\s*',                        # ↠ Reliable
               r'^[^\w\n]*wuthering\s+waves\s+leak\s+content',     # ✦ Wuthering Waves Leak Content
               r'follow\s+for\s+more\s+wuthering\s+waves\s+content', # ✦ Follow for more Wuthering Waves Content!
-          ]
-        ],
+          ],
     },
 
     # gensh1nuniverse — پیج لیک؛ کپشن: TITLE / بولت‌ها / «Via X» / #GenshinImpact (بدون تبلیغ)
