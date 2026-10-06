@@ -111,7 +111,7 @@ PROFILES = {
             r'^[^\w\n]*hashtags?[^\w\n]*$',       # ✦ Hashtags (تیتر؛ خود هشتگ‌ها جدا استخراج می‌شن)
         ],
     },
- 'montelli.news': {
+    'montelli.news': {
         'text_rules': [],
         'unmatched_non_video': 'LEAK',
         'video_fallback': 'LEAK',
@@ -143,7 +143,7 @@ PROFILES = {
     'schedule_delay_min': 90,
     'protect_blocks': [r'^\s*via\b'],
     'character_tags': 'Genshin Impact',
-},
+     },
 
     # ───────── پیج‌های ANINEXUS (aninexus_pages.json) ─────────
     # فعلاً خالی = رفتار سراسری؛ قواعد هر پیج بعد از تعیین اینجا پر می‌شه.
