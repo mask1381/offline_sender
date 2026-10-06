@@ -44,19 +44,25 @@ import download_and_send3 as dsend  # noqa: E402
 # حداقل فاصله‌ی بین دو پست زمان‌بندی‌شده‌ی پشت‌سرهم در یک اجرا (چه از یک پیج چه از پیج‌های مختلف)؛
 # تا آلبوم‌ها توی کانال با هم قاطی نشن.
 SCHEDULE_MIN_GAP_MIN = 3
-_last_schedule = None
+_used_schedule: list = []
 
 
-def spaced_schedule(dt):
-    """dt (یا None = فوری) رو طوری جابه‌جا می‌کنه که از آخرین زمان‌بندی این اجرا حداقل SCHEDULE_MIN_GAP_MIN دیرتر باشه."""
-    global _last_schedule
+def spaced_schedule(dt, gap_min=SCHEDULE_MIN_GAP_MIN):
+    """dt (یا None = فوری) رو طوری جابه‌جا می‌کنه که از همه‌ی زمان‌بندی‌های قبلی این اجرا
+    حداقل max(gap_min, SCHEDULE_MIN_GAP_MIN) دقیقه فاصله داشته باشه."""
     if dt is None:
         return None
-    if _last_schedule is not None and dt < _last_schedule + timedelta(minutes=SCHEDULE_MIN_GAP_MIN):
-        dt = _last_schedule + timedelta(minutes=SCHEDULE_MIN_GAP_MIN)
-    _last_schedule = dt
+    need = timedelta(minutes=max(float(gap_min or 0), SCHEDULE_MIN_GAP_MIN))
+    moved = True
+    while moved:
+        moved = False
+        for t in _used_schedule:
+            if abs(dt - t) < need:
+                dt = t + need
+                moved = True
+    _used_schedule.append(dt)
     return dt
-
+  
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
 APIFY_RESULTS_LIMIT = 12  # کمی بیشتر از MAX_PER_PAGE برای اطمینان از پوشش کامل
@@ -215,7 +221,29 @@ def has_audio_track(path: str) -> bool:
     codecs = [c.lower() for c in info.get("codecs", [])]
     return any(c in AUDIO_CODEC_FOURCCS for c in codecs)
 
-
+def add_silent_audio(files: list) -> list:
+    """ویدیوهای بی‌صدا (مثل Live2D) رو با یه track صوتی ساکت remux می‌کنه تا تلگرام
+    GIFشون نکنه. ویدیو re-encode نمی‌شه (-c:v copy)."""
+    out = []
+    for f in files:
+        if not f.lower().endswith(".mp4") or has_audio_track(f):
+            out.append(f)
+            continue
+        dst = f[:-4] + "_a.mp4"
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", f,
+                 "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                 "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", dst],
+                check=True, timeout=180, capture_output=True,
+            )
+            os.remove(f)
+            out.append(dst)
+            print(f"🔈 track صوتی ساکت اضافه شد: {os.path.basename(f)}")
+        except Exception as e:
+            print(f"⚠️ افزودن صدای ساکت نشد ({type(e).__name__}: {e}) — همون فایل اصلی فرستاده می‌شه")
+            out.append(f)
+    return out
 def ensure_audio(files: list, post_url: str, shortcode: str) -> tuple:
     """اگه هر کدوم از فایل‌های mp4 بی‌صدا بودن، کل پست رو با instaloader
     دوباره می‌گیره (چون instaloader مستقیم از صفحه‌ی پست می‌گیره، نه از
@@ -280,6 +308,7 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
     files = dsend.download_media_direct(media_items)
 
     # ─── چک صدا و fallback (اگه لازم بود) ───
+        # ─── چک صدا و fallback (اگه لازم بود) ───
     files_after, replaced = ensure_audio(files, post["url"], post["shortcode"])
     if files_after is None:
         # fallback fail شد و workdir پاک شده بود — دوباره از CDN بگیر
@@ -294,6 +323,9 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
             elif len(files) != orig_count and (start, end) != (0, orig_count):
                 print(f"⚠️ {post['shortcode']}: تعداد فایل‌های fallback ({len(files)}) با پست ({orig_count}) نمی‌خونه — حذف اسلاید اعمال نشد")
 
+    # اگه بعد از fallback هنوز بی‌صداست (مثل Live2D): track ساکت اضافه کن
+    if profile.get("silent_audio"):
+        files = add_silent_audio(files)
     # کراپ پایین عکس‌ها (پروفایل: crop_bottom_pct) — فقط عکس، ویدیو دست‌نخورده
     files = dsend.crop_bottom_pct_files(files, profile.get("crop_bottom_pct"))
 
@@ -318,7 +350,7 @@ def send_post(post: dict, chat_id: str, caption_mode: str, profile: dict = None)
     else:
         caption_final = dsend.build_caption(caption_raw)
 
-    schedule_dt = spaced_schedule(dsend.compute_schedule_dt(profile))
+    schedule_dt = spaced_schedule(dsend.compute_schedule_dt(profile), profile.get("schedule_gap_min"))
     sent = asyncio.run(
         dsend.send_items_to_telegram(files, caption_final, chat_id, thumb, video_meta, schedule_dt)
     )
