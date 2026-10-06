@@ -61,7 +61,36 @@ PROFILES = {
         'unmatched_non_video': 'LEAK',
         'video_fallback': 'LEAK',
     },
-
+    # wuwauniverse — پیج لیک ودرینگ ویوز؛ هشتگ خود پیج فقط #WutheringWaves
+    # ترتیب مهمه (اولین قاعده‌ی منطبق برنده‌ست)؛ قواعد سراسری v3 به‌عنوان fallback می‌مونن.
+    'wuwauniverse': {
+        'extra_rules': [
+            # فیگور/مسکات → ارسال نشه (state جلو می‌ره)
+            {'kind': None, 'video': True,
+             'patterns': [('title', r'\bfigures?\b|\bmascots?\b')]},
+            # Adهای 2D live (ویدیو) و ایلاستریشن → ART
+            {'kind': 'ART', 'video': True,
+             'patterns': [('title', r'\bad\s*$'), ('title', r'\billustrations?\b')]},
+            # رسمی (دستی بهشون رسیدگی می‌شه)
+            {'kind': 'OFFICIAL', 'video': True,
+             'patterns': [('title', r'maintenance|servers?\s+(?:are|is)\s+up|welcome to version|launcher')]},
+            {'kind': 'GUIDE', 'video': True,
+             'patterns': [('title', r'\blocations?\b|\bguide\b|\broutes?\b')]},
+            # LEAK = منبع (Via/Cre) AND کلمه‌ی آینده‌نگر/حدسی (بدون عدد نسخه)
+            {'kind': 'LEAK', 'video': True,
+             'patterns': [('text', r'(?s)(?=.*\b(?:via|cre)\b)'
+                                   r'(?=.*\b(?:may|might|will|rumou?rs?|leaks?|leaked|upcoming|'
+                                   r'brand-new|revolve|unconfirmed|reportedly)\b)')]},
+        ],
+        'unmatched_non_video': 'LEAK',    # عکس/آلبوم بدون قاعده
+        'video_fallback': 'CLIP',          # ویدیوی بدون قاعده (کلیپ دست‌ساز/ترند)
+        'schedule_delay_min': 90,
+        'schedule_gap_min': 20,            # حداقل فاصله‌ی زمان‌بندی این پست از هر پست دیگه
+        'silent_audio': True,              # ویدیوی بی‌صدا → track ساکت (جلوگیری از GIF شدن)
+        'protect_blocks': [r'^\s*(?:via|cre)\b'],
+        'redundant_tags': {'wuwa': 'wutheringwaves'},
+        'character_tags': 'Wuthering Waves',
+    },
     # steambird.id — همه‌چیز LEAK؛ اسلاید اول (کاور تبلیغاتی) خودکار حذف می‌شه (۳ تای آخر عمداً نه،
     # چون گاهی محتوای اصلی اونجاست → خودت از scheduled پاک می‌کنی)؛ ۱۰٪ پایین عکس‌ها (فوتر برند پیج)
     # کراپ می‌شه؛ همه‌ی پست‌ها (عکس/ویدیو/آلبوم) ۶۰ دقیقه بعد منتشر می‌شن تا review کنی.
@@ -80,6 +109,24 @@ PROFILES = {
             r'leaks\s+and\s+news\s+about',        # ↠ Leaks and News about Genshin Impact
             r'like\s*&\s*follow',                 # ↠ Like & Follow for more ...
             r'^[^\w\n]*hashtags?[^\w\n]*$',       # ✦ Hashtags (تیتر؛ خود هشتگ‌ها جدا استخراج می‌شن)
+        ],
+    },
+ 'montelli.news': {
+        'text_rules': [],
+        'unmatched_non_video': 'LEAK',
+        'video_fallback': 'LEAK',
+        'drop_first': 1,
+        'drop_last': 3,
+        'drop_min_items': 5,
+        'crop_bottom_pct': 10,
+        'schedule_delay_min': 60,
+        'redundant_tags': {'wuwa': 'wutheringwaves'},
+        'strip_blocks': [
+              r'^[^\w\n]*status\s*$',                             # ✦ Status
+              r'^[^\w\n]*(reliable|↠)\s*',                        # ↠ Reliable
+              r'^[^\w\n]*wuthering\s+waves\s+leak\s+content',     # ✦ Wuthering Waves Leak Content
+              r'follow\s+for\s+more\s+wuthering\s+waves\s+content', # ✦ Follow for more Wuthering Waves Content!
+          ]
         ],
     },
 
