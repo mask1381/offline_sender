@@ -26,7 +26,16 @@ aninexus_insta_check.py — چک شبانه‌ی پیج‌های اینستاگ�
   (یا "default") دقیقاً مثل قبل کپشن هشتگی می‌گیره. پروفایل ناشناخته = پیج رد می‌شه و
   state دست‌نخورده می‌مونه. کلیدهای پیاده‌شده اینجا: drop_first/drop_last/drop_min_items،
   keep_lines، strip_blocks، split_title، own_hashtags، raw_caption، drop_text،
-  blocked_hashtags، extra_hashtags، fixed_caption، continuation_caption.
+  blocked_hashtags، extra_hashtags، fixed_caption، continuation_caption، text_replace،
+  و کلیدهای جدید:
+    nfkc                    : کپشن قبل از هر پردازشی NFKC می‌شه (حروف بولد یونیکد «𝗣𝗹𝗼𝘁» ← «Plot»)
+    skip_if_caption_matches : لیست regex؛ اگه کپشن خام با هرکدوم بخوره، کل پست رد می‌شه
+    skip_if_all_cjk         : کل کپشن غیرلاتین (ژاپنی/چینی/کره‌ای) ← پست رد می‌شه
+    skip_if_ad              : عبارت‌های تبلیغیِ صریح (AD_PATTERNS + ad_patterns_extra) ← پست رد می‌شه
+    strip_label             : regex که از ابتدای متن (بعد از عنوان) حذف می‌شه (مثل «Plot:»)
+    tags_from_field         : regex با یک گروه؛ مقدارش (مثل اسم انیمه از «Anime: X») ← یک هشتگ
+    hashtag_fallback        : 'dictionary' ← اگه هشتگی نبود، فرنچایز/شخصیت از متن با دیکشنری
+    fallback_hashtag        : هشتگ ثابتِ آخرین راه (وقتی هیچ‌کدوم از روش‌های بالا هشتگی نساخت)
 
 هیچ منطق دانلود/ورد نویسی از صفر نیست: از download_and_send3.py (دانلود،
 entity resolution) و download_and_send4.py (کپشن هشتگی + ارسال زمان‌دار)
@@ -42,6 +51,7 @@ import re
 import subprocess
 import sys
 import time
+import unicodedata
 from datetime import datetime, timezone
 
 import requests
@@ -57,6 +67,46 @@ MAX_PER_PAGE = 8
 APIFY_RESULTS_LIMIT = 12
 CAPTION_LIMIT = 1024              # سقف کپشن تلگرام (کاراکتر قابل‌نمایش)
 SCHEDULE_CALL_GAP_SECONDS = 5.0   # فاصله‌ی واقعی بین هر schedule call (محض اطمینان، نه فاصله‌ی نمایش)
+
+CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+
+# فقط عبارت‌های تبلیغیِ صریح؛ منشن یا کلمه‌ی تکی (affiliate، pre-order، collab) عمداً نیست
+AD_PATTERNS = [
+    r"\blink\s+in\s+(?:(?:@[\w.]+(?:'s|’s)?|the|my|our|their)\s+)*bio\b",
+    r"\bbio\s+link\b",
+    r"\blink\s+in\s+(?:the\s+)?(?:comments?|description|profile)\b",
+    r"\bsign\s*up\s+for\s+(?:drop|release|early|updates|the\s+waitlist|our)\b",
+    r"\b(?:use|with)\s+(?:the\s+)?(?:code|coupon|promo)\b",
+    r"\b(?:promo|discount|coupon)\s+code\b",
+    r"\b\d{1,2}\s?%\s+off\b",
+    r"\b(?:shop|buy|order)\s+now\b",
+    r"\bgiveaway\b",
+    r"\bpaid\s+partnership\b|\bsponsored\b|#ad\b|#sponsored\b",
+]
+
+
+def skip_reason(raw: str, profile: dict):
+    """None = پست برود. در غیر این صورت دلیل رد (برای لاگ)."""
+    raw = raw or ""
+    if profile.get("nfkc"):
+        raw = unicodedata.normalize("NFKC", raw)
+
+    for pat in profile.get("skip_if_caption_matches", ()):
+        m = re.search(pat, raw, re.I | re.M)
+        if m:
+            return f"skip_if_caption_matches «{m.group(0)[:40]}»"
+
+    if profile.get("skip_if_all_cjk"):
+        plain = re.sub(r"#\w+|@[\w.]+|https?://\S+", " ", raw)
+        if CJK_RE.search(plain) and not re.search(r"[A-Za-z]{2,}", plain):
+            return "کل کپشن غیرلاتین"
+
+    if profile.get("skip_if_ad"):
+        for pat in AD_PATTERNS + list(profile.get("ad_patterns_extra", ())):
+            m = re.search(pat, raw, re.I | re.M)
+            if m:
+                return f"تبلیغ «{m.group(0)[:50]}»"
+    return None
 
 
 # ─────────────────────────────────────────
@@ -324,12 +374,10 @@ async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video
 
 
 # ─────────────────────────────────────────
-# مرحله‌ی ۱: جمع‌آوری همه‌ی پست‌های قابل‌ارسالِ همه‌ی پیج‌ها
-# ─────────────────────────────────────────
-# ─────────────────────────────────────────
 # کپشن بر اساس پروفایل پیج
 # ─────────────────────────────────────────
-PROFILE_CAPTION_KEYS = ("keep_lines", "own_hashtags", "raw_caption", "drop_text", "fixed_caption")
+PROFILE_CAPTION_KEYS = ("keep_lines", "own_hashtags", "raw_caption", "drop_text", "fixed_caption",
+                        "tags_from_field", "fallback_hashtag")
 
 
 def uses_profile_caption(profile: dict) -> bool:
@@ -368,6 +416,31 @@ def _own_hashtags(caption: str, profile: dict) -> list:
             seen.add(key)
             out.append("#" + str(h).lstrip("#"))
     return out
+
+
+def _field_tags(raw: str, profile: dict) -> list:
+    """tags_from_field: مقدار یک خط (مثل «Anime: X») ← یک هشتگ."""
+    m = re.search(profile["tags_from_field"], raw, re.I | re.M)
+    if not m:
+        return []
+    name = m.group(1).strip()
+    if len(re.findall(r"[A-Za-z0-9]", name)) < 2:       # «-» و «N/A» و مشابه
+        return []
+    tag = dsend4.to_hashtag(name)
+    return ["#" + tag] if tag else []
+
+
+def _dictionary_tags(raw: str) -> list:
+    """فرنچایز + حداکثر ۴ شخصیت از روی متن (فقط وقتی فرنچایز تشخیص داده شد)."""
+    cleaned = dsend4.clean_text(raw)
+    ngrams = dsend4.text_ngrams(cleaned)
+    fr = dsend4.detect_franchise([], ngrams, dsend4.text_ngrams(dsend4._title_text(cleaned)))
+    if not fr:
+        return []
+    chars = dsend4.detect_characters([], ngrams, fr)[:4]
+    names = [dsend4._DICT.franchise_display.get(fr) or fr] + chars
+    tags = dsend4.dedupe_tags([dsend4.to_hashtag(n) for n in names if n], protect=len(names))
+    return ["#" + t for t in tags if t]
 
 
 _TRAILING_TAGS_RE = re.compile(r"(?:[ \t]*#\w+)+[ \t]*$")
@@ -445,9 +518,17 @@ def build_profile_caption(caption_raw: str, profile: dict):
         body = _strip_hashtags(text)
         if body and profile.get("split_title", True):
             title, body = dsend3.split_title(body)
+        if body and profile.get("strip_label"):
+            body = re.sub(profile["strip_label"], "", body, count=1, flags=re.I).strip()
 
     if profile.get("own_hashtags") or raw_mode:
         tags = _own_hashtags(caption_raw, profile)
+    if not tags and profile.get("tags_from_field"):
+        tags = _field_tags(caption_raw, profile)
+    if not tags and profile.get("hashtag_fallback") == "dictionary" and not raw_mode:
+        tags = _dictionary_tags(caption_raw)
+    if not tags and profile.get("fallback_hashtag"):
+        tags = ["#" + str(profile["fallback_hashtag"]).lstrip("#")]
 
     cont = (profile.get("continuation_caption") or "").strip()
     continuation = html.escape(cont, quote=False) if cont else None
@@ -485,6 +566,8 @@ def lint_caption(raw: str, caption_html: str, profile: dict) -> list:
 def make_caption(raw: str, profile: dict):
     """ساخت کپشن (مشترک بین ران واقعی و --preview). خروجی: (caption, continuation, why)."""
     raw = raw or ""
+    if profile.get("nfkc"):
+        raw = unicodedata.normalize("NFKC", raw)
     # قانون‌های دستی هر پروفایل: "text_replace": [["regex", "جایگزین"], ...] — برای مورد غیرمنتظره بدون دست‌زدن به کد
     for pat, repl in (profile.get("text_replace") or ()):
         raw = re.sub(pat, repl, raw, flags=re.I | re.M)
@@ -522,9 +605,12 @@ def safe_make_caption(raw: str, profile: dict, label: str):
     return caption, continuation, why
 
 
+# ─────────────────────────────────────────
+# مرحله‌ی ۱: جمع‌آوری همه‌ی پست‌های قابل‌ارسالِ همه‌ی پیج‌ها
+# ─────────────────────────────────────────
 def collect_sendable_posts(pages: list) -> list:
     """خروجی: لیستی از {"page": page_dict, "post": post_dict, "caption": html}
-    همه‌ی پست‌های دارای رسانه (عکس یا ویدیو)."""
+    همه‌ی پست‌های دارای رسانه (عکس یا ویدیو) که طبق قواعد پروفایل رد نشده‌ن."""
     to_send = []
     for page in pages:
         username = page["username"]
@@ -548,6 +634,14 @@ def collect_sendable_posts(pages: list) -> list:
         print(f"📬 {len(new_posts)} پست جدید")
         for post in new_posts:
             shortcode = post["shortcode"]
+
+            reason = skip_reason(post["caption"], profile)
+            if reason:
+                print(f"🚫 {shortcode}: رد شد — {reason}")
+                page["last_post_id"] = shortcode
+                page["last_post_taken_at"] = post["takenAt"]
+                continue
+
             post["orig_count"] = len(post["media_items"])   # برای اعمال دوباره‌ی drop روی فایل‌های فال‌بک صدا
             media_items = dsend3.apply_media_drops(post["media_items"], profile)   # drop_first/drop_last
             post["media_items"] = media_items
@@ -653,7 +747,12 @@ def main():
 
     if args.preview is not None:
         prof = dsend3.resolve_profile(args.profile)
-        cap, cont, why = safe_make_caption(args.preview.replace("\\n", "\n"), prof, "preview")
+        _raw = args.preview.replace("\\n", "\n")
+        r = skip_reason(_raw, prof)
+        if r:
+            print(f"🚫 این پست رد می‌شد: {r}")
+            return
+        cap, cont, why = safe_make_caption(_raw, prof, "preview")
         print(f"\n🏷️ {why}\n{'─' * 40}\n{cap}")
         if cont:
             print(f"{'─' * 40}\n[ادامه‌ی کپشن]\n{cont}")
