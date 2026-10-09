@@ -150,38 +150,41 @@ PROFILES = {
     # hanbil_project — فقط سه خط Song / Artist / Anime نگه داشته می‌شه (تبلیغ «Want faster requests»،
     # «Sinopsis:» و پاراگراف‌های سینوپسیس حذف می‌شن)؛ هشتگ‌های خود پیج عیناً استفاده می‌شن و
     # سیستم هشتگ‌سازی اجرا نمی‌شه.
-  'animeotakuamv': {
-    'own_hashtags': True,
-    'split_title': False,
-    'text_replace': [
-        [r'(?s)anime\s*de[sp]\w*.*?(?=#\w|\Z)', ''],   # از «Anime Depscription» تا اولین هشتگ
-        [r'#\w*edit\w*', ''],                          # #animeedit, #edit, #amvedit ...
-        [r'(?m)^\s*\.\s*$', ''],                       # خطوط فقط-نقطه
-    ],
-    'extra_hashtags': ['amv'],
-},
+     # ───────── پیج‌های جدید ANINEXUS ─────────
+    'animeotakuamv': {
+        'own_hashtags': True,
+        'split_title': False,
+        'text_replace': [
+            [r'(?s)anime\s*de[sp]\w*.*?(?=#\w|\Z)', ''],   # از «Anime Depscription» تا اولین هشتگ
+            [r'#\w*edit\w*', ''],                          # #animeedit #edit #amvedit ...
+            [r'(?m)^\s*\.\s*$', ''],                       # خطوط فقط-نقطه
+        ],
+        'extra_hashtags': ['amv'],
+    },
 
-'animepixelwave': {
-    'own_hashtags': True,
-    'hashtag_fallback': 'dictionary',                  # بدون هشتگ ← دیکشنری از روی متن
-    'fallback_hashtag': 'AnimeNews',                   # اگر دیکشنری هم چیزی نیافت
-    'skip_if_caption_matches': [r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]'],
-    'split_title': True,
-    'strip_blocks': [r'\bfollow\s+@[\w.]+'],
-},
+    'animepixelwave': {
+        'own_hashtags': True,
+        'hashtag_fallback': 'dictionary',      # بدون هشتگ ← فرنچایز/شخصیت از متن
+        'fallback_hashtag': 'AnimeNews',       # اگر دیکشنری هم چیزی نیافت
+        'skip_if_caption_matches': [r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]'],
+        'skip_if_ad': True,
+        'split_title': True,
+        'strip_blocks': [r'\bfollow\s+@[\w.]+'],
+    },
 
-'suraimmu': {
-    'split_title': True,
-    'strip_blocks': [
-        r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]',   # پاراگراف CJK
-        r'^\s*(anime|genres|rating|status|available|dub|song)\s*:',
-    ],
-    'strip_label': r'^\s*plot\s*:\s*',
-    'tags_from_field': r'^\s*anime\s*:\s*(.+)$',       # هشتگ = فقط اسم انیمه
-    'fallback_hashtag': 'AnimeMeme',
-    'skip_if_all_cjk': True,                           # کل کپشن CJK ← رد
-    'skip_if_caption_matches': [r'@[\w.]+'],           # هر منشن ← کل پست رد (تبلیغ)
-},  
+    'suraimmu': {
+        'nfkc': True,                          # «𝗣𝗹𝗼𝘁/𝗔𝗻𝗶𝗺𝗲» یونیکد-بولد ← حروف عادی، تا regexها بخورند
+        'split_title': True,                   # خط اول (قبل از Plot) = عنوان
+        'strip_blocks': [
+            r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]',   # پاراگراف CJK
+            r'^\s*(anime|genres|rating|status|available|dub|song)\s*:',  # بلوک مشخصات
+        ],
+        'strip_label': r'^\s*plot\s*:\s*',
+        'tags_from_field': r'^\s*anime\s*:\s*(.+)$',   # هشتگ = فقط اسم انیمه
+        'fallback_hashtag': 'AnimeMeme',
+        'skip_if_all_cjk': True,
+        'skip_if_ad': True,                    # جایگزین رد کردن هر منشن
+    },  
   
   'hanbil_project': {
         'keep_lines': [
