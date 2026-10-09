@@ -180,7 +180,7 @@ PROFILES = {
             r'^\s*(anime|genres|rating|status|available|dub|song)\s*:',  # بلوک مشخصات
         ],
         'strip_label': r'^\s*plot\s*:\s*',
-        'tags_from_field': r'^\s*anime\s*:\s*(.+)$',   # هشتگ = فقط اسم انیمه
+        'tags_from_field': r'^[ \t]*anime[ \t]*:[ \t]*(.+)$',
         'fallback_hashtag': 'AnimeMeme',
         'skip_if_all_cjk': True,
         'skip_if_ad': True,                    # جایگزین رد کردن هر منشن
