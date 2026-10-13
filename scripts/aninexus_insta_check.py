@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-aninexus_insta_check.py — چک شبانه‌ی پیج‌های اینستاگرام برای کانال ANINEXUS (AniNexus_Lab).
+aninexus_insta_check.py — چک دوره‌ای (هر ۱۲ ساعت) پیج‌های اینستاگرام برای کانال ANINEXUS (AniNexus_Lab).
 
 برخلاف نسخه‌ی اول، اینجا دو مرحله‌ایه:
   ۱) همه‌ی پیج‌های aninexus_pages.json چک می‌شن و هرچی پست جدید هست جمع می‌شه
      (بدون ارسال فوری، بدون توجه به ترتیب بین پیج‌ها).
   ۲) بر اساس تعداد کل پست‌های جمع‌شده، هر کدوم با قابلیت schedule تلگرام توی
-     یه بازه‌ی ۲۴ساعته پخش می‌شن: از ۱ ساعت بعد از همین اجرا تا ۲ ساعت قبل
-     از اجرای فردا شب. این یعنی بین ۱۲ شب (وقتی اسکریپت اجرا می‌شه) تا ۱ شب،
-     و همچنین از ۱۰ شب تا ۱۲ شب، هیچ پستی زمان‌بندی نمی‌شه — تا وقت داشته
-     باشی قبل از هر انتشار، از بخش Scheduled Messages تلگرام پست‌ها رو ببینی
-     و در صورت نیاز دخالت کنی.
+     ۱۲ ساعتِ بعد پخش می‌شن: از ۲ ساعت بعد از همین اجرا تا ۱ ساعت قبل از اجرای
+     بعدی. این یعنی تا وقت داشته باشی قبل از هر انتشار، از بخش Scheduled Messages
+     تلگرام پست‌ها رو ببینی و در صورت نیاز دخالت کنی.
 
-تریگر این اسکریپت کاملاً دستیه (نه cron) — خود کاربر هر شب ساعت ۱۲ صداش می‌زنه.
+تریگر: GitHub Actions هر ۱۲ ساعت، ۰۶:۰۰ و ۱۸:۰۰ به وقت تهران (cron '30 2,14 * * *' به UTC)؛
+اجرای دستی (workflow_dispatch) هم هنوز هست.
 
 تغییر نسبت به نسخه‌ی aniwall:
   - هیچ پستی به‌خاطر نوع (عکس/ویدیو) یا نبودن هشتگ مرتبط رد نمی‌شه — فقط پست
@@ -68,6 +67,7 @@ APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
 APIFY_RESULTS_LIMIT = 12
 CAPTION_LIMIT = 1024              # سقف کپشن تلگرام (کاراکتر قابل‌نمایش)
+CYCLE_HOURS = 12.0                # فاصله‌ی تریگرها (۰۶:۰۰ و ۱۸:۰۰ تهران)؛ پست‌ها بین همین ۱۲ ساعتِ بعد پخش می‌شن
 SCHEDULE_CALL_GAP_SECONDS = 5.0   # فاصله‌ی واقعی بین هر schedule call (محض اطمینان، نه فاصله‌ی نمایش)
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
@@ -813,7 +813,7 @@ def schedule_all(to_send: list, chat_id: str):
         return
 
     now = datetime.now(timezone.utc)
-    times = dsend4.compute_schedule_times(now, len(to_send))
+    times = dsend4.compute_schedule_times(now, len(to_send), cycle_hours=CYCLE_HOURS)
 
     print(f"\n🗓️ {len(to_send)} پست، زمان‌بندی بین "
           f"{times[0].strftime('%H:%M UTC')} تا {times[-1].strftime('%H:%M UTC')}")
