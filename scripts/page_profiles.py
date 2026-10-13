@@ -28,7 +28,7 @@
   character_tags        : اسم فرنچایز (مثل 'Genshin Impact') → اسم شخصیت‌های داخل متن با دیکشنری v4 هشتگ می‌شن
                           (به ترتیب ظهور در متن؛ پاراگراف‌های protect_blocks در تشخیص حساب نمی‌شن؛ حداکثر ۶ تا)
   (کلیدهای پروفایل‌های ANINEXUS — keep_lines, own_hashtags, raw_caption, drop_text, blocked_hashtags,
-   extra_hashtags, fixed_caption, continuation_caption — توضیحشون بالای همون پروفایل‌هاست)
+   extra_hashtags, fixed_caption — توضیحشون بالای همون پروفایل‌هاست)
 
   (کلیدهای پروفایل‌های ANIWALL — فقط توی aniwall_insta_check.py، برای ساخت کپشنِ «فقط هشتگ»:)
   hashtag_mode          : 'own' = فقط هشتگ‌های خود پیج، منهای لیست‌های عمومی/ترند سراسری و قواعد همین پروفایل
@@ -181,7 +181,6 @@ PROFILES = {
         ],
         'strip_label': r'^\s*plot\s*:\s*',
         'tags_from_field': r'^[ \t]*anime[ \t]*:[ \t]*(.+)$',
-        'fallback_hashtag': 'AnimeMeme',
         'skip_if_all_cjk': True,
         'skip_if_ad': True,                    # جایگزین رد کردن هر منشن
     },  
@@ -221,14 +220,13 @@ PROFILES = {
     },
     # animeronix — پیج معرفی انیمه، کپشن خودش نداره: کپشن ثابت ما گذاشته می‌شه (بدون سیستم هشتگ‌سازی)؛
     # اسلاید اول (کاور/تبلیغ) حذف می‌شه؛ اگه بعد از حذف بیشتر از ۱۰ عکس بمونه، آلبوم‌های بعدی
-    # (۱۱ به بعد) به‌جای کپشن خالی، متن «ادامه‌ی آلبوم قبلی» می‌گیرن.
+    # (۱۱ به بعد) همون کپشن ثابت رو می‌گیرن (کپشن یکسان برای همه‌ی آلبوم‌ها، برای همه‌ی پیج‌ها).
     # ⚠️ fixed_caption جایگزین موقته — متن نهایی رو خودت بگو.
     'animeronix': {
         'drop_first': 1,
         'drop_last': 0,
         'split_title': False,
         'fixed_caption': '#Anime #AnimeSpotlight',
-        'continuation_caption': '↪️ Continued from the previous album',
     },
 
     # ───────── پیج‌های ANIWALL (aniwall_pages.json) ─────────

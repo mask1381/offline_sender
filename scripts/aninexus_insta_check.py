@@ -17,16 +17,18 @@ aninexus_insta_check.py — چک شبانه‌ی پیج‌های اینستاگ�
 تغییر نسبت به نسخه‌ی aniwall:
   - هیچ پستی به‌خاطر نوع (عکس/ویدیو) یا نبودن هشتگ مرتبط رد نمی‌شه — فقط پست
     بدون رسانه (که چیزی برای ارسال نداره) رد می‌شه.
-  - کپشن نهایی = کپشن اینستاگرام (داخل blockquote بازشونده) + بلوک هشتگِ همون
-    منطق قبلی (dsend4.build_hashtag_caption) + فوتر THE LABS. اگه هشتگی تشخیص
-    داده نشد، #AnimeArt.
+  - کپشن نهایی = [عنوان bold] + [blockquote بازشونده: متن] + [blockquote هشتگ] + فوتر THE LABS.
+    قانون‌ها به «شکل پست» وصلن، نه پیج (بخش «قانون‌های مبتنی بر شکل پست» پایین‌تر): اولویت
+    قانون صریح پروفایل پیج > قانون شکل پست > مسیر پیش‌فرض. هشتگ الزامی نیست؛ فالبک ثابت
+    (#AnimeArt و مشابه) دیگه نیست مگر پروفایل صراحتاً fallback_hashtag بده.
+  - پست بیش از ۱۰ فایل → آلبوم‌های هم‌اندازه، همه‌ی آلبوم‌ها همون کپشن کامل (برای همه‌ی پیج‌ها).
 
 پروفایل پیج‌ها (scripts/page_profiles.py):
   هر پیج توی aninexus_pages.json می‌تونه کلید "profile" داشته باشه. پیج بدون پروفایل
-  (یا "default") دقیقاً مثل قبل کپشن هشتگی می‌گیره. پروفایل ناشناخته = پیج رد می‌شه و
+  (یا "default") فقط قانون‌های شکل پست + مسیر پیش‌فرض رو می‌گیره. پروفایل ناشناخته = پیج رد می‌شه و
   state دست‌نخورده می‌مونه. کلیدهای پیاده‌شده اینجا: drop_first/drop_last/drop_min_items،
   keep_lines، strip_blocks، split_title، own_hashtags، raw_caption، drop_text،
-  blocked_hashtags، extra_hashtags، fixed_caption، continuation_caption، text_replace،
+  blocked_hashtags، extra_hashtags، fixed_caption، text_replace،
   و کلیدهای جدید:
     nfkc                    : کپشن قبل از هر پردازشی NFKC می‌شه (حروف بولد یونیکد «𝗣𝗹𝗼𝘁» ← «Plot»)
     skip_if_caption_matches : لیست regex؛ اگه کپشن خام با هرکدوم بخوره، کل پست رد می‌شه
@@ -281,7 +283,7 @@ def _visible_len(html_text: str) -> int:
 
 def build_full_caption(original_caption: str, hashtag_html: str) -> str:
     """کپشن اینستا (بازشونده) + بلوک هشتگ + فوتر، با رعایت سقف ۱۰۲۴ کاراکتر تلگرام."""
-    tail = f"{hashtag_html}\n\n{FOOTER_HTML}"
+    tail = (f"{hashtag_html}\n\n" if hashtag_html else "") + FOOTER_HTML
     body = re.sub(r"\n{3,}", "\n\n", (original_caption or "").strip())
     if not body:
         return tail
@@ -291,12 +293,11 @@ def build_full_caption(original_caption: str, hashtag_html: str) -> str:
     return f"<blockquote expandable>{html.escape(body, quote=False)}</blockquote>\n\n{tail}"
 
 
-async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video_meta=None,
-                         continuation_caption=None):
+async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video_meta=None):
     """ارسال زمان‌بندی‌شده‌ی عکس/ویدیو (تکی یا آلبوم) — همون منطق نسخه‌ی ۳:
       • بیش از ۱۰ فایل → آلبوم‌های هم‌اندازه (هیچ‌وقت آلبوم تک‌فایلی نمی‌سازه: ۱۱ → ۶+۵)
+        و *همه‌ی آلبوم‌ها دقیقاً همون کپشن کامل* رو می‌گیرن (برای همه‌ی پیج‌ها)
       • هر آلبوم ۱۰ ثانیه بعد از قبلی زمان‌بندی می‌شه تا ترتیبشون توی کانال حفظ بشه
-        (قبلاً همه با یک زمان ثابت می‌رفتن و «Continued» قبل از آلبوم اصلی منتشر می‌شد)
       • آلبوم دارای ویدیو با مدت/ابعاد/کاور واقعی ارسال می‌شه (بدون این، جعبه‌ی سیاه/۰۰:۰۰)
     """
     from datetime import timedelta
@@ -346,7 +347,7 @@ async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video
         print(f"   📚 {len(files)} فایل → {len(chunks)} آلبوم: {[len(c) for c in chunks]}")
 
         for idx, chunk in enumerate(chunks):
-            cap = caption if idx == 0 else (continuation_caption or "")
+            cap = caption                      # کپشن یکسان برای همه‌ی آلبوم‌های یک پست
             when = schedule_dt + timedelta(seconds=10 * idx)
             sent = None
             if any(x.lower().endswith(".mp4") for x in chunk):
@@ -376,13 +377,158 @@ async def send_scheduled(files, caption, chat_id, schedule_dt, thumb=None, video
 # ─────────────────────────────────────────
 # کپشن بر اساس پروفایل پیج
 # ─────────────────────────────────────────
-PROFILE_CAPTION_KEYS = ("keep_lines", "own_hashtags", "raw_caption", "drop_text", "fixed_caption",
-                        "tags_from_field", "fallback_hashtag")
+# ═══════════════════════════════════════════════════════════
+# قانون‌های مبتنی بر «شکل پست» (نه پیج) — روی هر پستِ هر پیجی اجرا می‌شن.
+# اولویت: قانون صریح پروفایل پیج  >  قانون شکل پست  >  مسیر پیش‌فرض.
+# مسیر پیش‌فرض (پستی که هیچ قانونی نخورد): خط اول عنوان، بقیه متن، هشتگ‌های خود پست بعد از فیلتر؛
+# هشتگ الزامی نیست — چیزی نموند، بدون بلوک هشتگ می‌ره (فالبک ثابت فقط اگه پروفایل صراحتاً بخواد).
+# دیکشنری مکمله نه مرجع: فقط اضافه می‌کنه (فرنچایز عنوان)، چیزی رو به‌خاطر ناشناخته بودن حذف نمی‌کنه.
+# ═══════════════════════════════════════════════════════════
+_MENTION_RE = re.compile(r"(?<![\w.])@[\w.]{2,}")
+_MENTION_ONLY_RE = re.compile(r"^[\W_]*(?:@[\w.]+[\W_]*)+$")
+_PROMO_LINE_RE = re.compile(
+    r"\bfollow\s+(?:us|me|for|@|our)\b"                                          # Follow for more ... / Follow @x
+    r"|^\W*(?:credits?|cr|via|source|video|clip|edit|music|art|artist|by)\b.*@[\w.]+",   # Credit: @x
+    re.I)
+_TAGS_ONLY_RE = re.compile(r"^\s*(?:#\w+[\s.]*)+$")
+_STRUCT_LABEL_RE = re.compile(r"^\s*(song|artist|anime|plot|genres|rating)\s*:", re.I | re.M)
+_NOISE_TAG_RE = re.compile(
+    r"^fyp|foryou|follow|like4|likefor|^l4l$|^f4f$|viral|^trend|^explore|^reels?"
+    r"|^insta(?:gram|good|daily|like|mood|pic|photo|reels?)")
 
 
-def uses_profile_caption(profile: dict) -> bool:
-    """True = این پیج کپشن اختصاصی داره؛ False = همون کپشن هشتگیِ قبلی."""
-    return any(profile.get(k) for k in PROFILE_CAPTION_KEYS)
+def _cjk_heavy(text: str) -> bool:
+    """پاراگراف/خط عمدتاً ژاپنی/چینی/کره‌ای (نه فقط یک اسم داخل جمله‌ی انگلیسی)."""
+    cjk = len(CJK_RE.findall(text))
+    letters = len(re.findall(r"[^\W\d_]", text))
+    return bool(cjk) and (cjk >= 8 or cjk / max(letters, 1) > 0.25)
+
+
+def _clean_lines(para: str) -> str:
+    """خط تبلیغ/کردیت/فقط‌منشن حذف می‌شه؛ منشنِ وسط جمله فقط خودِ @handle برداشته می‌شه (متن خبر نمی‌پره)."""
+    out = []
+    for ln in para.splitlines():
+        if _PROMO_LINE_RE.search(ln) or _MENTION_ONLY_RE.match(ln):
+            continue
+        out.append(re.sub(r"[ \t]{2,}", " ", _MENTION_RE.sub("", ln)).rstrip())
+    return "\n".join(out)
+
+
+def post_clean_text(raw: str) -> str:
+    """قانون‌های متنی شکل پست:
+      • خط تبلیغ Follow / کردیت منشن‌دار حذف می‌شه (کل پست رد نمی‌شه)
+      • عنوان لاتین + پاراگراف ژاپنی/چینی/کره‌ای ← اون پاراگراف و بلوک «فقط هشتگ»ِ چسبیده بعدش حذف
+        (هشتگ‌های متن ژاپنی مال این پست نیستن: #ONEPIECE زیر پست Black Clover)"""
+    raw = raw or ""
+    first = next((ln for ln in raw.splitlines() if ln.strip()), "")
+    title_latin = bool(first) and not CJK_RE.search(first)
+    out, dropped_prev = [], False
+    for i, para in enumerate(re.split(r"\n[ \t]*\n", raw)):
+        if title_latin and i == 0:
+            para = "\n".join(ln for ln in para.splitlines() if not _cjk_heavy(ln))
+        elif title_latin and _cjk_heavy(para):
+            dropped_prev = True
+            continue
+        elif dropped_prev and _TAGS_ONLY_RE.match(para):
+            dropped_prev = False
+            continue
+        dropped_prev = False
+        cleaned = _clean_lines(para)
+        if cleaned.strip():
+            out.append(cleaned)
+    return "\n\n".join(out)
+
+
+def post_shape_rules(raw: str) -> dict:
+    """کلیدهای پروفایل که از شکل پست استنباط می‌شن.
+    پست «کلیپ موزیک» (هم Song: هم Artist:، بدون Plot/Genres/Rating) ← فقط خطوط Song/Artist/Anime، بدون عنوان جدا."""
+    labels = {m.lower() for m in _STRUCT_LABEL_RE.findall(raw or "")}
+    if {"song", "artist"} <= labels and not (labels & {"plot", "genres", "rating"}):
+        return {"keep_lines": [r"^\s*song\s*:", r"^\s*artist\s*:", r"^\s*anime\s*:"], "split_title": False}
+    return {}
+
+
+_TEXT_SHAPING_KEYS = ("keep_lines", "strip_blocks", "drop_text", "fixed_caption", "raw_caption")
+_EXPLICIT_TAG_KEYS = ("own_hashtags", "raw_caption", "fixed_caption", "drop_text")
+
+
+def effective_profile(raw: str, profile: dict) -> dict:
+    """پروفایل نهایی = قانون شکل پست زیر قانون صریح پیج. کلیدهای داخلی با _ شروع می‌شن."""
+    eff = dict(profile)
+    if not any(profile.get(k) for k in _TEXT_SHAPING_KEYS):
+        for k, v in post_shape_rules(raw).items():
+            eff.setdefault(k, v)
+    eff["_clean_text"] = not (profile.get("raw_caption") or profile.get("drop_text"))
+    eff["_smart_tags"] = not any(profile.get(k) for k in _EXPLICIT_TAG_KEYS)
+    return eff
+
+
+def _known_franchise(key: str):
+    return dsend4.detect_franchise([key], set(), None)
+
+
+def _is_noise_tag(key: str) -> bool:
+    """هشتگ «بد» (ترند/تعامل‌گیری/عمومی)، نه «ناشناخته». هشتگی که خودش فرنچایزِ دیکشنریه (مثل jjk)
+    فقط به‌خاطر حضور توی لیست‌های سراسری حذف نمی‌شه."""
+    if _NOISE_TAG_RE.search(key):
+        return True
+    if key in dsend4.GENERIC_HASHTAGS or key in dsend4.INSTAGRAM_TREND_HASHTAGS or key in dsend4.DENY:
+        return not _known_franchise(key)
+    return False
+
+
+def _title_franchise(line: str):
+    """فرنچایز مورد اشاره‌ی عنوان. تطبیق‌های تو‌در‌تو (clover داخل blackclover) فقط بلندترینشون حساب می‌شه؛
+    اگه دو فرنچایز مستقل توی عنوان باشه ← None (حدس نمی‌زنه). کلید کوتاه‌تر از ۴ حرف نادیده."""
+    hits = {}
+    for g in dsend4.text_ngrams(line):
+        name = dsend4._DICT.franchise_map.get(g)
+        if name and g not in dsend4._DICT.weak_franchise_keys and len(g) >= dsend4.MIN_FRANCHISE_KEY_LEN:
+            hits[g] = name
+    top = {g: n for g, n in hits.items() if not any(g != g2 and g in g2 for g2 in hits)}
+    names = set(top.values())
+    return names.pop() if len(names) == 1 else None
+
+
+def _conflicts_with_title(key: str, title_fr) -> bool:
+    """هشتگ مال فرنچایزِ دیگه‌ای (در دیکشنری) غیر از فرنچایز عنوان. ناشناخته در دیکشنری = تعارض نیست."""
+    if not title_fr:
+        return False
+    other = _known_franchise(key)
+    if not other or other == title_fr:
+        return False
+    return not dsend4.detect_characters([key], set(), title_fr)   # شخصیتِ فرنچایز عنوان استثناست
+
+
+def _smart_hashtags(raw_clean: str, profile: dict, lead: list):
+    """هشتگ‌های خود پست − بد/تعارض + فرنچایز عنوان (مکمل). lead = هشتگ‌های قانون صریح پیج (اول می‌آن)."""
+    body = _strip_hashtags(raw_clean)
+    first = next((ln for ln in body.splitlines() if ln.strip()), "")
+    title_fr = _title_franchise(first)
+    blocked = {dsend4.compact(str(b)) for b in (profile.get("blocked_hashtags") or ())}
+
+    tags, seen, dropped = [], set(), []
+    for h in dsend3.extract_hashtags(raw_clean):
+        tag = _latin_tag(h)
+        key = dsend4.compact(tag)
+        if not tag or key in seen:
+            continue
+        seen.add(key)
+        if key in blocked or _is_noise_tag(key) or _conflicts_with_title(key, title_fr):
+            dropped.append(tag)
+            continue
+        tags.append(tag)
+    for h in (profile.get("extra_hashtags") or ()):
+        t = str(h).lstrip("#")
+        if t and dsend4.compact(t) not in seen:
+            seen.add(dsend4.compact(t))
+            tags.append(t)
+
+    head = [t.lstrip("#") for t in lead]
+    if title_fr:
+        head.append(dsend4.to_hashtag(dsend4._DICT.franchise_display.get(title_fr) or title_fr))
+    tags = dsend4.dedupe_tags(head + tags, protect=len(head))
+    return ["#" + t for t in tags if t], f"فرنچایز-عنوان={title_fr!r} حذف‌شده={dropped}"
 
 
 def _hashtag_block(tags: list) -> str:
@@ -494,12 +640,16 @@ def _compose_caption(title: str, body: str, tags: list) -> str:
 
 
 def build_profile_caption(caption_raw: str, profile: dict):
-    """خروجی: (کپشن اول HTML, کپشن آلبوم‌های بعدی یا None, دلیل برای لاگ)."""
+    """خروجی: (کپشن HTML, دلیل برای لاگ). profile همون effective_profile است (قانون پیج + شکل پست)."""
     caption_raw = caption_raw or ""
     raw_mode = bool(profile.get("raw_caption"))
     title = body = ""
     tags = []
+    info = ""
     fixed = (profile.get("fixed_caption") or "").strip()
+
+    if profile.get("_clean_text", True):
+        caption_raw = post_clean_text(caption_raw)
 
     if profile.get("drop_text"):
         pass
@@ -518,23 +668,27 @@ def build_profile_caption(caption_raw: str, profile: dict):
         body = _strip_hashtags(text)
         if body and profile.get("split_title", True):
             title, body = dsend3.split_title(body)
+            # کپشن تک‌خطیِ کوتاه (بدون متن بعدش) = خودش عنوانه، نه یه blockquote بازشونده
+            if not title and "\n" not in body and len(body) <= dsend3.TITLE_MAX_LEN:
+                title, body = body, ""
         if body and profile.get("strip_label"):
             body = re.sub(profile["strip_label"], "", body, count=1, flags=re.I).strip()
 
+    field_tags = _field_tags(caption_raw, profile) if profile.get("tags_from_field") else []
     if profile.get("own_hashtags") or raw_mode:
         tags = _own_hashtags(caption_raw, profile)
-    if not tags and profile.get("tags_from_field"):
-        tags = _field_tags(caption_raw, profile)
+    elif profile.get("_smart_tags"):
+        tags, info = _smart_hashtags(caption_raw, profile, field_tags)
+    if not tags:
+        tags = field_tags
     if not tags and profile.get("hashtag_fallback") == "dictionary" and not raw_mode:
         tags = _dictionary_tags(caption_raw)
     if not tags and profile.get("fallback_hashtag"):
         tags = ["#" + str(profile["fallback_hashtag"]).lstrip("#")]
 
-    cont = (profile.get("continuation_caption") or "").strip()
-    continuation = html.escape(cont, quote=False) if cont else None
-    why = (f"پروفایل: عنوان={'✓' if title else '✗'} متن={'✓' if body else '✗'} "
-           f"هشتگ={len(tags)}{' | کپشن ادامه ✓' if continuation else ''}")
-    return _compose_caption(title, body, tags), continuation, why
+    why = (f"عنوان={'✓' if title else '✗'} متن={'✓' if body else '✗'} هشتگ={tags}"
+           f"{' | ' + info if info else ''}")
+    return _compose_caption(title, body, tags), why
 
 
 WARNINGS: list = []   # همه‌ی هشدارهای ران؛ آخر ران با ::warning:: توی خلاصه‌ی GitHub Actions چاپ می‌شن
@@ -564,45 +718,35 @@ def lint_caption(raw: str, caption_html: str, profile: dict) -> list:
 
 
 def make_caption(raw: str, profile: dict):
-    """ساخت کپشن (مشترک بین ران واقعی و --preview). خروجی: (caption, continuation, why)."""
+    """ساخت کپشن (مشترک بین ران واقعی و --preview). خروجی: (caption, why).
+    همه‌ی پست‌ها از یک مسیر رد می‌شن: قانون صریح پیج روی قانون شکل پست، بعد مسیر پیش‌فرض."""
     raw = raw or ""
     if profile.get("nfkc"):
         raw = unicodedata.normalize("NFKC", raw)
     # قانون‌های دستی هر پروفایل: "text_replace": [["regex", "جایگزین"], ...] — برای مورد غیرمنتظره بدون دست‌زدن به کد
     for pat, repl in (profile.get("text_replace") or ()):
         raw = re.sub(pat, repl, raw, flags=re.I | re.M)
-    continuation = None
-    if uses_profile_caption(profile):
-        caption, continuation, why = build_profile_caption(raw, profile)
-    else:
-        hashtag_html, why = dsend4.build_hashtag_caption(raw)
-        if hashtag_html is None:
-            hashtag_html = f"<blockquote>💠 #{dsend4.FALLBACK_TAG}</blockquote>"
-            why = f"هشتگ مرتبطی پیدا نشد — فالبک #{dsend4.FALLBACK_TAG}"
-        caption = build_full_caption(raw, hashtag_html)
-    return caption, continuation, why
+    return build_profile_caption(raw, effective_profile(raw, profile))
 
 
 def safe_make_caption(raw: str, profile: dict, label: str):
-    """اگه ساخت کپشن خطا داد، کل ران نمی‌خوابه: کپشن امن (فقط هشتگ فالبک) ساخته می‌شه + هشدار."""
+    """اگه ساخت کپشن خطا داد، کل ران نمی‌خوابه: کپشن امن (متن خام تمیزشده + فوتر، بدون هشتگ) + هشدار."""
     try:
-        caption, continuation, why = make_caption(raw, profile)
+        caption, why = make_caption(raw, profile)
     except Exception as e:
-        warn(f"{label}: ساخت کپشن خطا داد ({type(e).__name__}: {e}) — کپشن خام + #{dsend4.FALLBACK_TAG} فرستاده می‌شه")
-        tag_html = f"<blockquote>💠 #{dsend4.FALLBACK_TAG}</blockquote>"
+        warn(f"{label}: ساخت کپشن خطا داد ({type(e).__name__}: {e}) — کپشن خام بدون هشتگ فرستاده می‌شه")
         try:
-            # کپشن خام اینستا (بازشونده، با سقف ۱۰۲۴) + هشتگ فالبک + فوتر
-            caption = build_full_caption(raw, f"{tag_html}\n\n{FOOTER_HTML}")
+            caption = build_full_caption(_strip_hashtags(post_clean_text(raw)), "")
         except Exception as e2:
-            warn(f"{label}: کپشن خام هم نشد ({type(e2).__name__}: {e2}) — فقط هشتگ + فوتر")
-            caption = f"{tag_html}\n\n{FOOTER_HTML}"
-        return caption, None, "فالبک بعد از خطا (کپشن خام)"
+            warn(f"{label}: کپشن خام هم نشد ({type(e2).__name__}: {e2}) — فقط فوتر")
+            caption = FOOTER_HTML
+        return caption, "فالبک بعد از خطا (کپشن خام بدون هشتگ)"
     for w in lint_caption(raw, caption, profile):
         warn(f"{label}: {w}")
     visible = html.unescape(re.sub(r"<[^>]+>", "", caption.replace(FOOTER_HTML, ""))).strip()
     print(f"   📝 خام  : {(raw or '')[:160]!r}")
     print(f"   📤 نهایی: {visible[:160]!r}")
-    return caption, continuation, why
+    return caption, why
 
 
 # ─────────────────────────────────────────
@@ -652,11 +796,10 @@ def collect_sendable_posts(pages: list) -> list:
                 page["last_post_taken_at"] = post["takenAt"]
                 continue
 
-            caption, continuation, why = safe_make_caption(post["caption"], profile, f"{username}/{shortcode}")
+            caption, why = safe_make_caption(post["caption"], profile, f"{username}/{shortcode}")
             kinds = ",".join(sorted({(i.get("type") or "").lower() for i in media_items}))
             print(f'🏷️ {shortcode} [{kinds}]: {why}')
-            to_send.append({"page": page, "post": post, "caption": caption, "continuation": continuation,
-                            "profile": profile})
+            to_send.append({"page": page, "post": post, "caption": caption, "profile": profile})
 
     return to_send
 
@@ -714,8 +857,7 @@ def schedule_all(to_send: list, chat_id: str):
                     video_meta = [{"duration": i.get("duration")} for i in post["media_items"]
                                   if (i.get("type") or "").lower() == "video"]
             sent = asyncio.run(
-                send_scheduled(files, item["caption"], chat_id, when, thumb=thumb, video_meta=video_meta,
-                               continuation_caption=item.get("continuation"))
+                send_scheduled(files, item["caption"], chat_id, when, thumb=thumb, video_meta=video_meta)
             )
             ids = ", ".join(str(s.id) for s in sent)
             print(f"✅ {shortcode} زمان‌بندی شد برای {when.strftime('%Y-%m-%d %H:%M UTC')} "
@@ -752,10 +894,8 @@ def main():
         if r:
             print(f"🚫 این پست رد می‌شد: {r}")
             return
-        cap, cont, why = safe_make_caption(_raw, prof, "preview")
+        cap, why = safe_make_caption(_raw, prof, "preview")
         print(f"\n🏷️ {why}\n{'─' * 40}\n{cap}")
-        if cont:
-            print(f"{'─' * 40}\n[ادامه‌ی کپشن]\n{cont}")
         return
 
     if not APIFY_TOKEN:
