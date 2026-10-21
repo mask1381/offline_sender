@@ -1,0 +1,5 @@
+private/
+.env
+local_worker.py
+*.session
+__pycache__/
