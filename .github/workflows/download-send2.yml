@@ -1,0 +1,77 @@
+name: Download and Send to Telegram (Instagram)
+
+on:
+  workflow_dispatch:
+    inputs:
+      media_json:
+        description: >-
+          (روش اصلی) JSON آرایه‌ای از {"url":"...","type":"photo|video"} —
+          لینک‌های CDN مستقیم که Apify از خروجی اسکرپ استخراج کرده. با این
+          روش هیچ لاگین/instaloader لازم نیست.
+        required: false
+        type: string
+      caption:
+        description: 'کپشن اصلی پست (از خروجی Apify — فقط وقتی media_json پر شده استفاده می‌شه)'
+        required: false
+        type: string
+      url:
+        description: '[فقط ردیت، یا فال‌بک قدیمی اینستاگرام] لینک پست'
+        required: false
+        type: string
+      chat_id:
+        description: 'chat_id مقصد در تلگرام'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  download-and-send2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Setup Instagram session (optional — فقط برای فال‌بک قدیمی instaloader)
+        run: |
+          if [ -z "${{ secrets.INSTAGRAM_SESSION_B64 }}" ]; then
+            echo "IG_SESSION_ARG=" >> "$GITHUB_ENV"
+          else
+            echo "${{ secrets.INSTAGRAM_SESSION_B64 }}" | base64 -d > ig_session.bin
+            echo "IG_SESSION_ARG=--ig-session ig_session.bin" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run download & send script
+        id: download
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION_STRING: ${{ secrets.TG_SESSION_STRING }}
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          # نکته‌ی مهم: این‌ها رو از طریق env می‌فرستیم نه با جایگذاری مستقیم
+          # داخل رشته‌ی run — چون media_json/caption کوتیشن و newline دارن و
+          # جایگذاری مستقیم GitHub Actions باعث می‌شه bash رشته‌ی دستور رو
+          # زودتر از موعد ببنده (خطای "line N: --caption: command not found").
+          # با env، مقدار مستقیم و دست‌نخورده به‌عنوان یک متغیر ست می‌شه و
+          # bash دیگه مجبور به parse دوباره‌ی محتوای داخلش نیست.
+          INPUT_CHAT_ID: ${{ inputs.chat_id }}
+          INPUT_MEDIA_JSON: ${{ inputs.media_json }}
+          INPUT_CAPTION: ${{ inputs.caption }}
+          INPUT_URL: ${{ inputs.url }}
+        run: |
+          python scripts/download_and_send2.py \
+            --chat-id "$INPUT_CHAT_ID" \
+            --media-json "$INPUT_MEDIA_JSON" \
+            --caption "$INPUT_CAPTION" \
+            --url "$INPUT_URL" \
+            ${{ env.IG_SESSION_ARG }}
