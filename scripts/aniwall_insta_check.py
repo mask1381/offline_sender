@@ -41,6 +41,7 @@ from telethon.errors import FloodWaitError
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import download_and_send3 as dsend3          # noqa: E402 — دانلود/entity resolution
 import download_and_send4 as dsend4          # noqa: E402 — کپشن هشتگی/ارسال زمان‌دار
+import pages_store                          # noqa: E402 — جدا کردن config از state (بخش ۱.۴)
 
 APIFY_TOKEN = os.environ.get("APIFY_TOKEN", "").strip()
 MAX_PER_PAGE = 8
@@ -49,39 +50,24 @@ MAX_PHOTOS_PER_RUN = 95           # سقف پیام‌های زمان‌بندی
 SCHEDULE_CALL_GAP_SECONDS = 5.0   # فاصله‌ی واقعی بین هر schedule call (محض اطمینان، نه فاصله‌ی نمایش)
 
 
-# ─────────────────────────────────────────
-# خوندن/نوشتن aniwall_pages.json
-# ─────────────────────────────────────────
-def load_pages(path: str) -> list:
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+def state_path_of(pages_file: str) -> str:
+    """فایل state جدا از فایل config (بخش ۱.۴)."""
+    return pages_file.replace(".json", "_state.json")
 
 
-def save_pages(path: str, pages: list):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(pages, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+def load_pages(config_path):
+    """config + state را می‌خواند و در آبجکتِ هر پیج merge می‌کند."""
+    return pages_store.load_pages(config_path, state_path_of(config_path))
+
+
+def save_pages(pages_file: str, pages: list):
+    """فقط state را جدا می‌نویسد — config دست نمی‌خورد."""
+    pages_store.save_state(state_path_of(pages_file), pages)
 
 
 def git_commit_and_push(pages_file: str, message: str) -> bool:
-    try:
-        subprocess.run(["git", "config", "user.name", "aniwall-insta-bot"], check=True)
-        subprocess.run(["git", "config", "user.email", "aniwall-insta-bot@users.noreply.github.com"], check=True)
-        subprocess.run(["git", "add", pages_file], check=True)
-
-        diff = subprocess.run(["git", "diff", "--cached", "--quiet"])
-        if diff.returncode == 0:
-            print("ℹ️ تغییری برای کامیت نبود.")
-            return True
-
-        subprocess.run(["git", "commit", "-m", message], check=True)
-        subprocess.run(["git", "pull", "--rebase", "--autostash"], check=False)
-        subprocess.run(["git", "push"], check=True)
-        print(f"✅ کامیت و پوش شد: {message}")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ git commit/push شکست خورد: {e}")
-        return False
+    """state (+configِ تازه‌ساخته) را کامیت و پوش می‌کند."""
+    return pages_store.git_commit_and_push([state_path_of(pages_file), pages_file], message, "aniwall-insta-bot")
 
 
 # ─────────────────────────────────────────

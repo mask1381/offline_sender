@@ -72,40 +72,26 @@ AUDIO_CODEC_FOURCCS = {"mp4a", "ac-3", "ec-3", "opus", "alac", "samr", "sawb"}
 
 
 # ─────────────────────────────────────────
-# خوندن/نوشتن pages.json
+# خوندن/نوشتن pages.json + جدا کردن config از state (بخش ۱.۴)
 # ─────────────────────────────────────────
+def _state_path(pages_file: str) -> str:
+    return pages_file.replace(".json", "_state.json")
+
+
 def load_pages(path: str) -> list:
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    import pages_store
+    return pages_store.load_pages(path, _state_path(path))
 
 
 def save_pages(path: str, pages: list):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(pages, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    import pages_store
+    pages_store.save_state(_state_path(path), pages)
 
 
 def git_commit_and_push(pages_file: str, message: str) -> bool:
-    """کامیت و پوش تغییرات pages.json. اگه چیزی برای کامیت نبود، بی‌سروصدا True برمی‌گردونه."""
-    try:
-        subprocess.run(["git", "config", "user.name", "gacha-insta-bot"], check=True)
-        subprocess.run(["git", "config", "user.email", "gacha-insta-bot@users.noreply.github.com"], check=True)
-        subprocess.run(["git", "add", pages_file], check=True)
-
-        diff = subprocess.run(["git", "diff", "--cached", "--quiet"])
-        if diff.returncode == 0:
-            print("ℹ️ تغییری برای کامیت نبود.")
-            return True
-
-        subprocess.run(["git", "commit", "-m", message], check=True)
-        # قبل از push یه rebase سبک، برای وقتی چند اجرا هم‌پوشانی داشتن
-        subprocess.run(["git", "pull", "--rebase", "--autostash"], check=False)
-        subprocess.run(["git", "push"], check=True)
-        print(f"✅ کامیت و پوش شد: {message}")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ git commit/push شکست خورد: {e}")
-        return False
+    """فایل(های) state/config را کامیت و پوش می‌کند."""
+    import pages_store
+    return pages_store.git_commit_and_push([_state_path(pages_file), pages_file], message, "gacha-insta-bot")
 
 
 # ─────────────────────────────────────────

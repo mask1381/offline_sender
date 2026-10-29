@@ -56,16 +56,36 @@ def load_modules():
 
 
 # ─────────────────────────────────────────
-# تلگرام (سشن یوزربات) — هر عملیات یک اتصال کوتاه، پشت‌سرهم (نه هم‌زمان)
+# تلگرام (سشن یوزربات) — یک اتصال پایدار که بین همه‌ی عملیات مشترکه.
+# قبلاً هر _call_ یک connect/disconnect جدا داشت (برای batch ۲۰ پستی ۴۰+ اتصال).
+# حالا یک client روی یک event loop ثابت نگه داشته می‌شه و فقط آخرِ کار disconnect می‌شه.
 # ─────────────────────────────────────────
-async def _connect():
-    client = TelegramClient(
-        StringSession(os.environ["TG_SESSION_STRING"].strip()),
-        int(os.environ["TG_API_ID"].strip()),
-        os.environ["TG_API_HASH"].strip(),
-    )
-    await client.connect()
-    return client
+_loop = asyncio.new_event_loop()
+_client = None
+
+
+def _connect():
+    """بازگشت client سراسری (اگر قطع شده باشد دوباره وصل می‌شه). هرگز disconnect نمی‌شود."""
+    global _client
+    if _client is None or not _client.is_connected():
+        _client = TelegramClient(
+            StringSession(os.environ["TG_SESSION_STRING"].strip()),
+            int(os.environ["TG_API_ID"].strip()),
+            os.environ["TG_API_HASH"].strip(),
+        )
+        _loop.run_until_complete(_client.connect())
+    return _client
+
+
+def _close_pool():
+    """اتصال پایدار را می‌بندد (آخرِ ران؛ برای جلوگیری از AuthKeyDuplicated)."""
+    global _client
+    if _client is not None:
+        try:
+            _loop.run_until_complete(_client.disconnect())
+        except Exception as e:
+            print(f"close pool failed: {type(e).__name__}")
+        _client = None
 
 
 async def _resolve(client, chat_id):
@@ -78,31 +98,25 @@ async def _resolve(client, chat_id):
 
 
 async def _fetch_batch(chat_id, message_id):
-    client = await _connect()
-    try:
-        entity = await _resolve(client, chat_id)
-        msg = await client.get_messages(entity, ids=int(message_id))
-        if not msg or not msg.media:
-            raise RuntimeError("batch message not found")
-        data = await client.download_media(msg, file=bytes)
-        return json.loads(data.decode("utf-8"))
-    finally:
-        await client.disconnect()
+    client = _connect()          # مشترک — disconnect نمی‌شود
+    entity = await _resolve(client, chat_id)
+    msg = await client.get_messages(entity, ids=int(message_id))
+    if not msg or not msg.media:
+        raise RuntimeError("batch message not found")
+    data = await client.download_media(msg, file=bytes)
+    return json.loads(data.decode("utf-8"))
 
 
 async def _say(chat_id, text):
-    client = await _connect()
-    try:
-        entity = await _resolve(client, chat_id)
-        await client.send_message(entity, text, parse_mode=None)
-    finally:
-        await client.disconnect()
+    client = _connect()          # مشترک — disconnect نمی‌شود
+    entity = await _resolve(client, chat_id)
+    await client.send_message(entity, text, parse_mode=None)
 
 
 def say(chat_id, text) -> bool:
     for _ in range(3):
         try:
-            asyncio.run(_say(chat_id, str(text)[:4000]))
+            _loop.run_until_complete(_say(chat_id, str(text)[:4000]))
             return True
         except FloodWaitError as e:
             time.sleep(min(e.seconds + 1, 60))
@@ -110,6 +124,16 @@ def say(chat_id, text) -> bool:
             print(f"say failed: {type(e).__name__}")
             time.sleep(3)
     return False
+
+
+def github_run_url() -> str:
+    """لینک عمومی رانِ GitHub Actions که این اسکریپت داخلش اجرا می‌شه (برای پیام خطا)."""
+    server = os.environ.get("GITHUB_SERVER_URL", "").strip().rstrip("/")
+    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    run = os.environ.get("GITHUB_RUN_ID", "").strip()
+    if server and repo and run:
+        return f"{server}/{repo}/actions/runs/{run}"
+    return ""
 
 
 # ─────────────────────────────────────────
@@ -484,7 +508,6 @@ def main() -> int:
             return 1
 
     load_modules()
-    ctx = None
     try:
         batch = asyncio.run(_fetch_batch(chat, args.message_id))
         if batch.get("batch_id") != args.batch_id:
@@ -495,17 +518,23 @@ def main() -> int:
             raise RuntimeError("unknown kind")
         ctx = Ctx(batch, chat)
         print(f"batch loaded: {len(batch.get('posts') or [])} posts")
-        try:
-            runner(ctx)
-        finally:
-            say(chat, f"/ack {ctx.batch_id} done")
+        runner(ctx)
+        # ۳.۱: /ack done فقط وقتی runner سالم تمام شد فرستاده می‌شه. اگه runner وسطِ کار
+        # crash کنه، پست‌های نافرستاده بی‌پاسخ می‌مونن و دفعه‌ی بعد دوباره گرفته می‌شن
+        # (بات batch رو open نگه می‌داره تا وقتی stale بشه) — نه «done» نه «crash بی‌صدا».
+        say(chat, f"/ack {ctx.batch_id} done")
         c = ctx.counts
         print(f"finished: sent={c['sent']} skipped={c['skipped']} failed={c['failed']} aborted={ctx.aborted}")
         return 2 if ctx.aborted else 0
     except Exception as e:                                # فقط اسم خطا توی لاگ عمومی
-        print(f"crashed: {type(e).__name__}")
-        say(chat, f"❌ {args.batch_id} crashed: {type(e).__name__}: {str(e)[:300]}")
+        detail = f"{type(e).__name__}: {str(e)[:300]}"
+        print(f"crashed: {detail}")
+        url = github_run_url()
+        # ۳.۵: پیام خطای توصیفی با لینک ران — نه فقط اسم کلاس
+        say(chat, f"❌ {args.batch_id} crashed: {detail}" + (f"\n🔍 {url}" if url else ""))
         return 1
+    finally:
+        _close_pool()   # ۳.۶: اتصال پایدار را در پایان ران می‌بندیم
 
 
 if __name__ == "__main__":

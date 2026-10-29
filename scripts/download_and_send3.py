@@ -180,9 +180,10 @@ GENERIC_TAGS = {
 # profile=None یا {} یعنی همین قواعد سراسری بالا، بدون هیچ تغییری.
 # ─────────────────────────────────────────
 try:
-    from page_profiles import PROFILES
+    from page_profiles import PROFILES, validate_profiles
 except ImportError:  # فایل نبود → فقط پروفایل پیش‌فرض
     PROFILES = {'default': {}}
+    validate_profiles = None
 
 
 def resolve_profile(name):
@@ -193,6 +194,14 @@ def resolve_profile(name):
     if name not in PROFILES:
         raise KeyError(f'پروفایل ناشناخته: {name!r} (تعریف‌شده‌ها: {sorted(PROFILES)})')
     return dict(PROFILES[name])
+
+
+# اعتبارسنجی ساختاری پروفایل‌ها موقع import (یک‌بار) — بخش ۱.۵
+if validate_profiles:
+    try:
+        validate_profiles()
+    except Exception:
+        pass   # فقط هشدار؛ اجازه‌ی ادامه‌ی import را می‌دهد
 
 
 def drop_range(n: int, profile: dict = None):

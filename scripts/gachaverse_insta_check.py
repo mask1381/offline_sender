@@ -280,21 +280,10 @@ def build_game_caption(original_caption: str, shortcode: str):
 # git
 # ─────────────────────────────────────────
 def git_commit_and_push(pages_file: str, message: str) -> bool:
-    try:
-        subprocess.run(["git", "config", "user.name", "gachaverse-insta-bot"], check=True)
-        subprocess.run(["git", "config", "user.email", "gachaverse-insta-bot@users.noreply.github.com"], check=True)
-        subprocess.run(["git", "add", pages_file], check=True)
-        if subprocess.run(["git", "diff", "--cached", "--quiet"]).returncode == 0:
-            print("ℹ️ تغییری برای کامیت نبود.")
-            return True
-        subprocess.run(["git", "commit", "-m", message], check=True)
-        subprocess.run(["git", "pull", "--rebase", "--autostash"], check=False)
-        subprocess.run(["git", "push"], check=True)
-        print(f"✅ کامیت و پوش شد: {message}")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ git commit/push شکست خورد: {e}")
-        return False
+    """state/config را جدا کامیت و پوش می‌کند (بخش ۱.۴)."""
+    import pages_store
+    state = pages_file.replace(".json", "_state.json")
+    return pages_store.git_commit_and_push([state, pages_file], message, "gachaverse-insta-bot")
 
 
 # ─────────────────────────────────────────
