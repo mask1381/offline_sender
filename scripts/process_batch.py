@@ -56,36 +56,32 @@ def load_modules():
 
 
 # ─────────────────────────────────────────
-# تلگرام (سشن یوزربات) — یک اتصال پایدار که بین همه‌ی عملیات مشترکه.
-# قبلاً هر _call_ یک connect/disconnect جدا داشت (برای batch ۲۰ پستی ۴۰+ اتصال).
-# حالا یک client روی یک event loop ثابت نگه داشته می‌شه و فقط آخرِ کار disconnect می‌شه.
+# تلگرام (سشن یوزربات) — اتصال آزاد برای هر عملیات، با فراهم‌کننده‌ای که به main
+# اجازه می‌دهد همه‌چیز را روی یک event loop اجرا کند. هر عملیات client مخصوص خودش
+# را می‌سازد و توی finally بسته می‌شود (مانند ماژول‌های ارسال که client خودشان را دارند).
 # ─────────────────────────────────────────
-_loop = asyncio.new_event_loop()
-_client = None
+async def _connect():
+    client = TelegramClient(
+        StringSession(os.environ["TG_SESSION_STRING"].strip()),
+        int(os.environ["TG_API_ID"].strip()),
+        os.environ["TG_API_HASH"].strip(),
+    )
+    await client.connect()
+    return client
 
 
-def _connect():
-    """بازگشت client سراسری (اگر قطع شده باشد دوباره وصل می‌شه). هرگز disconnect نمی‌شود."""
-    global _client
-    if _client is None or not _client.is_connected():
-        _client = TelegramClient(
-            StringSession(os.environ["TG_SESSION_STRING"].strip()),
-            int(os.environ["TG_API_ID"].strip()),
-            os.environ["TG_API_HASH"].strip(),
-        )
-        _loop.run_until_complete(_client.connect())
-    return _client
-
-
-def _close_pool():
-    """اتصال پایدار را می‌بندد (آخرِ ران؛ برای جلوگیری از AuthKeyDuplicated)."""
-    global _client
-    if _client is not None:
-        try:
-            _loop.run_until_complete(_client.disconnect())
-        except Exception as e:
-            print(f"close pool failed: {type(e).__name__}")
-        _client = None
+async def _run(coro_factory, *args, **kwargs):
+    """یک coroutine را با client تازه اجرا کرده و در پایان قطع می‌کند."""
+    client = None
+    try:
+        client = await _connect()
+        return await coro_factory(client, *args, **kwargs)
+    finally:
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception as e:
+                print(f"disconnect failed: {type(e).__name__}")
 
 
 async def _resolve(client, chat_id):
@@ -97,8 +93,7 @@ async def _resolve(client, chat_id):
         return await client.get_input_entity(value)
 
 
-async def _fetch_batch(chat_id, message_id):
-    client = _connect()          # مشترک — disconnect نمی‌شود
+async def _fetch_batch(client, chat_id, message_id):
     entity = await _resolve(client, chat_id)
     msg = await client.get_messages(entity, ids=int(message_id))
     if not msg or not msg.media:
@@ -107,22 +102,21 @@ async def _fetch_batch(chat_id, message_id):
     return json.loads(data.decode("utf-8"))
 
 
-async def _say(chat_id, text):
-    client = _connect()          # مشترک — disconnect نمی‌شود
+async def _say(client, chat_id, text):
     entity = await _resolve(client, chat_id)
     await client.send_message(entity, text, parse_mode=None)
 
 
-def say(chat_id, text) -> bool:
+async def say(chat_id, text) -> bool:
     for _ in range(3):
         try:
-            _loop.run_until_complete(_say(chat_id, str(text)[:4000]))
+            await _run(_say, chat_id, str(text)[:4000])
             return True
         except FloodWaitError as e:
-            time.sleep(min(e.seconds + 1, 60))
+            await asyncio.sleep(min(e.seconds + 1, 60))
         except Exception as e:                       # فقط اسم خطا (لاگ عمومیه)
             print(f"say failed: {type(e).__name__}")
-            time.sleep(3)
+            await asyncio.sleep(3)
     return False
 
 
@@ -151,18 +145,31 @@ def run_quiet(fn, *args, **kwargs):
         return None, buf.getvalue(), e
 
 
-def with_retry(fn):
-    """دو تلاش؛ FloodWait تلاش دوباره نداره."""
+async def with_retry_async(fn):
+    """دو تلاش (سازگار با coroutine)؛ FloodWait تلاش دوباره نداره."""
     out, log, err = None, "", None
     for attempt in (1, 2):
-        out, log, err = run_quiet(fn)
+        out, log, err = await run_quiet_async(fn)
         if err is None:
             return out, log, None
         if isinstance(err, FloodWaitError):
             break
         if attempt == 1:
-            time.sleep(5)
+            await asyncio.sleep(5)
     return None, log, err
+
+
+async def run_quiet_async(fn):
+    """اجرای coroutine با capture خروجی؛ شبیه run_quiet ولی async."""
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            result = await fn()
+            return result, buf.getvalue(), None
+    except KeyboardInterrupt:
+        raise
+    except BaseException as e:                       # SystemExit از دانلود هم شکست حساب می‌شه
+        return None, buf.getvalue(), e
 
 
 def fmt_when(dt) -> str:
@@ -181,13 +188,13 @@ class Ctx:
         self.blocked = set()       # صفحه‌هایی که توی مرحله‌ی آماده‌سازی شکست خوردن
         self.aborted = False       # FloodWait
 
-    def ack(self, idx, status, code="-", when="-"):
+    async def ack(self, idx, status, code="-", when="-"):
         self.counts[status] += 1
-        say(self.chat, f"/ack {self.batch_id} {idx} {status} {code or '-'} {when or '-'}")
+        await say(self.chat, f"/ack {self.batch_id} {idx} {status} {code or '-'} {when or '-'}")
 
-    def private_log(self, idx, err, log):
+    async def private_log(self, idx, err, log):
         tail = (log or "")[-LOG_TAIL:]
-        say(self.chat, f"🧾 {self.batch_id} #{idx}\n{type(err).__name__}: {str(err)[:300]}\n\n{tail}")
+        await say(self.chat, f"🧾 {self.batch_id} #{idx}\n{type(err).__name__}: {str(err)[:300]}\n\n{tail}")
 
 
 # ─────────────────────────────────────────
@@ -210,7 +217,7 @@ def make_entry(p):
     }
 
 
-def build_plan(ctx, posts, prepare):
+async def build_plan(ctx, posts, prepare):
     """prepare(e) روی هر پست: e["skip"] (کد رد) یا e["caption"] و ... رو پر می‌کنه."""
     plan = []
     for p in posts:
@@ -223,13 +230,13 @@ def build_plan(ctx, posts, prepare):
             e["profile"] = d3.resolve_profile(e["page"]["profile"])
         except KeyError:
             ctx.blocked.add(e["pid"])
-            ctx.ack(e["idx"], "failed", "bad_profile")
+            await ctx.ack(e["idx"], "failed", "bad_profile")
             continue
         _, log, err = run_quiet(prepare, e)
         if err is not None:
             ctx.blocked.add(e["pid"])
-            ctx.ack(e["idx"], "failed", "prepare")
-            ctx.private_log(e["idx"], err, log)
+            await ctx.ack(e["idx"], "failed", "prepare")
+            await ctx.private_log(e["idx"], err, log)
             continue
         plan.append(e)
     return plan
@@ -245,35 +252,35 @@ def hold_from(plan, start):
             held.add(e["pid"])
 
 
-def deliver(ctx, plan, sender):
+async def deliver(ctx, plan, sender):
     for e in plan:
         if ctx.aborted:
             break
         if e["hold"]:
             continue
         if e["skip"]:
-            ctx.ack(e["idx"], "skipped", e["skip"])
+            await ctx.ack(e["idx"], "skipped", e["skip"])
             continue
-        out, log, err = with_retry(lambda: sender(e))
+        out, log, err = await with_retry_async(lambda: sender(e))
         if err is None:
             if isinstance(out, tuple) and out and out[0] == "skipped":
-                ctx.ack(e["idx"], "skipped", out[1])
+                await ctx.ack(e["idx"], "skipped", out[1])
             else:
-                ctx.ack(e["idx"], "sent", "-", fmt_when(e.get("when") or (out[1] if isinstance(out, tuple) and len(out) > 1 else None)))
+                await ctx.ack(e["idx"], "sent", "-", fmt_when(e.get("when") or (out[1] if isinstance(out, tuple) and len(out) > 1 else None)))
         elif isinstance(err, FloodWaitError):
-            ctx.ack(e["idx"], "failed", "flood")
-            ctx.private_log(e["idx"], err, log)
+            await ctx.ack(e["idx"], "failed", "flood")
+            await ctx.private_log(e["idx"], err, log)
             ctx.aborted = True
         else:
-            ctx.private_log(e["idx"], err, log)
-            ctx.ack(e["idx"], "skipped", "gave_up")
-        time.sleep(SEND_GAP_SECONDS)
+            await ctx.private_log(e["idx"], err, log)
+            await ctx.ack(e["idx"], "skipped", "gave_up")
+        await asyncio.sleep(SEND_GAP_SECONDS)
 
 
 # ─────────────────────────────────────────
 # kind = gacha  (پورت send_post از gacha_insta_check، حالت channel)
 # ─────────────────────────────────────────
-def send_gacha(ctx, e):
+async def send_gacha(ctx, e):
     post, profile = e["post"], e["profile"]
     media_items = post["media_items"]
     if not media_items:
@@ -322,14 +329,14 @@ def send_gacha(ctx, e):
 
     caption_final = d3.build_channel_caption(kind, caption_raw, tags, post["url"], profile)
     when = gch.spaced_schedule(d3.compute_schedule_dt(profile), profile.get("schedule_gap_min"))
-    asyncio.run(d3.send_items_to_telegram(files, caption_final, ctx.target, thumb, video_meta, when))
+    await d3.send_items_to_telegram(files, caption_final, ctx.target, thumb, video_meta, when)
     e["when"] = when
     return ("sent", when)
 
 
-def run_gacha(ctx):
-    plan = build_plan(ctx, ctx.batch["posts"], lambda e: None)
-    deliver(ctx, plan, lambda e: send_gacha(ctx, e))
+async def run_gacha(ctx):
+    plan = await build_plan(ctx, ctx.batch["posts"], lambda e: None)
+    await deliver(ctx, plan, lambda e: send_gacha(ctx, e))
 
 
 # ─────────────────────────────────────────
@@ -350,8 +357,8 @@ def prepare_aniwall(e):
     e["caption"] = caption
 
 
-def run_aniwall(ctx):
-    plan = build_plan(ctx, ctx.batch["posts"], prepare_aniwall)
+async def run_aniwall(ctx):
+    plan = await build_plan(ctx, ctx.batch["posts"], prepare_aniwall)
     plan, log, err = run_quiet(anw.apply_photo_cap, plan)
     if err is not None:
         raise err
@@ -363,13 +370,13 @@ def run_aniwall(ctx):
     for e, t in zip(send_entries, times):
         e["when"] = t
 
-    def send(e):
+    async def send(e):
         anw.reset_workdir()
         files = d3.download_media_direct(e["post"]["media_items"])
-        asyncio.run(d4.send_photo_album_scheduled(files, e["caption"], ctx.target, schedule_dt=e["when"]))
+        await d4.send_photo_album_scheduled(files, e["caption"], ctx.target, schedule_dt=e["when"])
         return ("sent", e["when"])
 
-    deliver(ctx, plan, send)
+    await deliver(ctx, plan, send)
 
 
 # ─────────────────────────────────────────
@@ -389,7 +396,7 @@ def prepare_aninexus(e):
     e["caption"], e["cont"] = caption, cont
 
 
-def send_aninexus(ctx, e):
+async def send_aninexus(ctx, e):
     post = e["post"]
     sc = post["shortcode"]
     anx.reset_workdir()
@@ -413,20 +420,20 @@ def send_aninexus(ctx, e):
         if not replaced:
             video_meta = [{"duration": i.get("duration")} for i in post["media_items"]
                           if (i.get("type") or "").lower() == "video"]
-    asyncio.run(anx.send_scheduled(
+    await anx.send_scheduled(
         files, e["caption"], ctx.target, e["when"], thumb=thumb, video_meta=video_meta,
         continuation_caption=e.get("cont"),
-    ))
+    )
     return ("sent", e["when"])
 
 
-def run_aninexus(ctx):
-    plan = build_plan(ctx, ctx.batch["posts"], prepare_aninexus)
+async def run_aninexus(ctx):
+    plan = await build_plan(ctx, ctx.batch["posts"], prepare_aninexus)
     send_entries = [e for e in plan if e["caption"] is not None and not e["hold"]]
     times = d4.compute_schedule_times(datetime.now(timezone.utc), len(send_entries))
     for e, t in zip(send_entries, times):
         e["when"] = t
-    deliver(ctx, plan, lambda e: send_aninexus(ctx, e))
+    await deliver(ctx, plan, lambda e: send_aninexus(ctx, e))
 
 
 # ─────────────────────────────────────────
@@ -444,8 +451,8 @@ def prepare_gachaverse(e):
     e["caption"] = caption
 
 
-def run_gachaverse(ctx):
-    plan = build_plan(ctx, ctx.batch["posts"], prepare_gachaverse)
+async def run_gachaverse(ctx):
+    plan = await build_plan(ctx, ctx.batch["posts"], prepare_gachaverse)
 
     # سقف پیام‌های زمان‌بندی‌شده‌ی تلگرام: بقیه بدون ack می‌مونن (دفعه‌ی بعد)
     sendable = 0
@@ -462,17 +469,35 @@ def run_gachaverse(ctx):
     for e, t in zip(send_entries, times):
         e["when"] = t
 
-    def send(e):
-        gv.send_entry({"post": e["post"], "caption": e["caption"]}, ctx.target, e["when"])
+    async def send(e):
+        # همون منطق gv.send_entry ولی بدون asyncio.run (تا loop تو در تو نشه)
+        post = e["post"]
+        media_items = post["media_items"]
+        gch.reset_workdir()
+        files = d3.download_media_direct(media_items)
+        has_video = any((i.get("type") or "").lower() == "video" for i in media_items)
+        if not has_video:
+            await d4.send_photo_album_scheduled(files, e["caption"], ctx.target, schedule_dt=e["when"])
+        else:
+            files_after, replaced = gch.ensure_audio(files, post["url"], post["shortcode"])
+            if files_after is None:
+                files = d3.download_media_direct(media_items)
+            else:
+                files = files_after
+            thumb = d3.prepare_thumb(media_items, files)
+            video_meta = None if replaced else next(
+                (i for i in media_items if (i.get("type") or "").lower() == "video"), None
+            )
+            await d3.send_items_to_telegram(files, e["caption"], ctx.target, thumb, video_meta, e["when"])
         return ("sent", e["when"])
 
-    deliver(ctx, plan, send)
+    await deliver(ctx, plan, send)
 
 
-def run_selftest(ctx):
+async def run_selftest(ctx):
     """تست مسیر: هیچ‌چیز دانلود/ارسال نمی‌شه، فقط ack می‌ره (ماژول‌ها هم import شدن)."""
     for p in ctx.batch["posts"]:
-        ctx.ack(p["idx"], "skipped", "test")
+        await ctx.ack(p["idx"], "skipped", "test")
 
 
 RUNNERS = {
@@ -508,33 +533,35 @@ def main() -> int:
             return 1
 
     load_modules()
-    try:
-        batch = asyncio.run(_fetch_batch(chat, args.message_id))
-        if batch.get("batch_id") != args.batch_id:
-            raise RuntimeError("batch id mismatch")
-        apply_batch_config(batch)
-        runner = RUNNERS.get(batch.get("kind"))
-        if runner is None:
-            raise RuntimeError("unknown kind")
-        ctx = Ctx(batch, chat)
-        print(f"batch loaded: {len(batch.get('posts') or [])} posts")
-        runner(ctx)
-        # ۳.۱: /ack done فقط وقتی runner سالم تمام شد فرستاده می‌شه. اگه runner وسطِ کار
-        # crash کنه، پست‌های نافرستاده بی‌پاسخ می‌مونن و دفعه‌ی بعد دوباره گرفته می‌شن
-        # (بات batch رو open نگه می‌داره تا وقتی stale بشه) — نه «done» نه «crash بی‌صدا».
-        say(chat, f"/ack {ctx.batch_id} done")
-        c = ctx.counts
-        print(f"finished: sent={c['sent']} skipped={c['skipped']} failed={c['failed']} aborted={ctx.aborted}")
-        return 2 if ctx.aborted else 0
-    except Exception as e:                                # فقط اسم خطا توی لاگ عمومی
-        detail = f"{type(e).__name__}: {str(e)[:300]}"
-        print(f"crashed: {detail}")
-        url = github_run_url()
-        # ۳.۵: پیام خطای توصیفی با لینک ران — نه فقط اسم کلاس
-        say(chat, f"❌ {args.batch_id} crashed: {detail}" + (f"\n🔍 {url}" if url else ""))
-        return 1
-    finally:
-        _close_pool()   # ۳.۶: اتصال پایدار را در پایان ران می‌بندیم
+
+    async def amain() -> int:
+        try:
+            batch = await _run(_fetch_batch, chat, args.message_id)
+            if batch.get("batch_id") != args.batch_id:
+                raise RuntimeError("batch id mismatch")
+            apply_batch_config(batch)
+            runner = RUNNERS.get(batch.get("kind"))
+            if runner is None:
+                raise RuntimeError("unknown kind")
+            ctx = Ctx(batch, chat)
+            print(f"batch loaded: {len(batch.get('posts') or [])} posts")
+            await runner(ctx)
+            # ۳.۱: /ack done فقط وقتی runner سالم تمام شد فرستاده می‌شه. اگه runner وسطِ کار
+            # crash کنه، پست‌های نافرستاده بی‌پاسخ می‌مونن و دفعه‌ی بعد دوباره گرفته می‌شن
+            # (بات batch رو open نگه می‌داره تا وقتی stale بشه) — نه «done» نه «crash بی‌صدا».
+            await say(chat, f"/ack {ctx.batch_id} done")
+            c = ctx.counts
+            print(f"finished: sent={c['sent']} skipped={c['skipped']} failed={c['failed']} aborted={ctx.aborted}")
+            return 2 if ctx.aborted else 0
+        except Exception as e:                                # فقط اسم خطا توی لاگ عمومی
+            detail = f"{type(e).__name__}: {str(e)[:300]}"
+            print(f"crashed: {detail}")
+            url = github_run_url()
+            # ۳.۵: پیام خطای توصیفی با لینک ران — نه فقط اسم کلاس
+            await say(chat, f"❌ {args.batch_id} crashed: {detail}" + (f"\n🔍 {url}" if url else ""))
+            return 1
+
+    return asyncio.run(amain())
 
 
 if __name__ == "__main__":
